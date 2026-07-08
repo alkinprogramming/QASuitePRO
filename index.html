@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quality Assurance - Suite de Gestión QA PRO</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- ============ AUTH SCREEN ============ -->
+    <div id="authScreen" class="auth-container" style="display:none;">
+        <div class="auth-card">
+            <div class="auth-header">
+                <div class="auth-logo">🛡️</div>
+                <div class="auth-title">QA Suite PRO</div>
+                <div class="auth-subtitle">Gestión integral de calidad</div>
+            </div>
+
+            <div id="loginForm">
+                <div class="form-group">
+                    <label>Usuario</label>
+                    <input type="text" id="loginUser" placeholder="usuario">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="loginPass" placeholder="••••••••">
+                </div>
+                <button class="btn btn-accent" onclick="doLogin()">Iniciar sesión</button>
+                <div class="auth-toggle">¿Nuevo usuario? <b onclick="showRegister()">Crear cuenta</b></div>
+            </div>
+
+            <div id="registerForm" style="display:none;">
+                <div class="form-group">
+                    <label>Nombre completo</label>
+                    <input type="text" id="regName" placeholder="Juan Pérez">
+                </div>
+                <div class="form-group">
+                    <label>Usuario</label>
+                    <input type="text" id="regUser" placeholder="juan.perez">
+                </div>
+                <div class="form-group">
+                    <label>Contraseña</label>
+                    <input type="password" id="regPass" placeholder="Mínimo 6 caracteres">
+                </div>
+                <div class="form-group">
+                    <label>Confirmar contraseña</label>
+                    <input type="password" id="regPass2">
+                </div>
+                <div class="form-group">
+                    <label>Rol</label>
+                    <select id="regRole" class="role-select">
+                        <option>Admin</option>
+                        <option>Consultor</option>
+                    </select>
+                </div>
+                <button class="btn btn-accent" onclick="doRegister()">Registrarse</button>
+                <div class="auth-toggle">¿Ya tienes cuenta? <b onclick="showLogin()">Iniciar sesión</b></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ APP SCREEN ============ -->
+    <div id="appScreen" style="display:none;">
+
+        <!-- Sidebar -->
+        <aside id="sidebar" class="sidebar">
+            <!-- Generado dinámicamente -->
+        </aside>
+
+        <!-- Main wrapper -->
+        <div class="main-wrapper">
+
+            <!-- Header -->
+            <header class="header">
+                <div class="header-left">
+                    <button class="burger" onclick="toggleSidebar()">☰</button>
+                    <div class="project-selector">
+                        <span>📌</span>
+                        <select id="activeProjectSelect" onchange="onProjectChange()">
+                            <option value="">-- Selecciona un Proyecto --</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="header-right">
+                    <button class="icon-btn" onclick="navigateTo('ajustes')" title="Atajos: Ctrl+K">
+                        🔍
+                    </button>
+                    <button class="icon-btn notification-btn" onclick="toggleNotifications()" title="Notificaciones">
+
+                        <span class="notification-badge" id="notifBadge">0</span>
+                    </button>
+                    <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
+                        <span id="themeIcon">🌓</span>
+                    </button>
+
+                    <!-- User dropdown -->
+                    <div class="user-dropdown-container">
+                        <button class="user-trigger" onclick="toggleUserMenu()">
+                            <div class="avatar" id="userAvatar">U</div>
+                            <span id="userDisplay">Usuario</span>
+                            <span>▼</span>
+                        </button>
+                        <div class="dropdown-menu" id="userMenu">
+                            <a href="#" onclick="openProfile(); return false;"> Mi Perfil</a>
+                            <a href="#" onclick="navigateTo('ajustes'); return false;">️ Ajustes</a>
+                            <div class="divider"></div>
+                            <a href="#" class="danger" onclick="handleLogout(); return false;">🚪 Cerrar Sesión</a>
+                        </div>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Content -->
+            <main class="content" id="contentArea">
+                <!-- Rendered dynamically -->
+            </main>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="modalContainer"></div>
+    <div id="toastContainer"></div>
+    <div id="notificationsPanel" class="notifications-panel"></div>
+
+    <script src="script.js"></script>
+</body>
+
+</html>
