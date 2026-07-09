@@ -88,7 +88,7 @@
             {
                 section: 'Seguimiento', items: [
                     { page: 'trazabilidad', icon: '🔍', label: 'Trazabilidad', iconClass: 'icon-trazabilidad' },
-                    { page: 'informes', icon: '', label: 'Informes', iconClass: 'icon-informes' },
+                    { page: 'informes', icon: '📄', label: 'Informes', iconClass: 'icon-informes' },
                     { page: 'historico', icon: '📦', label: 'Histórico', iconClass: 'icon-historico' },
                     { page: 'ajustes', icon: '⚙️', label: 'Ajustes', iconClass: 'icon-ajustes' }
                 ], adminOnly: true
@@ -379,7 +379,7 @@
         );
     }
 
-    function navigateTo(page) {
+    window.navigateTo = function(page) {
         if (currentUser.rol === 'Consultor' && !consultorPages.includes(page)) {
             toast('No tienes permiso para acceder a esta sección', 'error');
             return;
@@ -394,7 +394,7 @@
         const activeNav = document.querySelector(`[data-page="${page}"]`);
         if (activeNav) activeNav.classList.add('active');
         renderPage(page);
-    }
+    };
 
     function renderPage(page) {
         const content = document.getElementById('contentArea');
@@ -557,6 +557,54 @@
         const projOpts = appData.proyectos.map(p =>
             `<option ${item?.proyecto === p.id ? 'selected' : ''}>${p.id}</option>`
         ).join('');
+        
+        // --- Generador de opciones de usuarios ---
+        const userOpts = (selectedValue) => {
+            let opts = '<option value="">Seleccionar responsable...</option>';
+            if (appData.usuarios && appData.usuarios.length > 0) {
+                opts += appData.usuarios.map(u => 
+                    `<option value="${u.nombre}" ${selectedValue === u.nombre ? 'selected' : ''}>${u.nombre}</option>`
+                ).join('');
+            }
+            return opts;
+        };
+
+        // --- NUEVO: Generador de opciones para seleccionar Casos y Bugs en Capturas ---
+        const getCasosBugsOpts = (selectedValue) => {
+            let opts = '<option value="">Ninguno / Seleccionar...</option>';
+            if (appData.casos && appData.casos.length > 0) {
+                opts += '<optgroup label="Casos de Prueba">';
+                appData.casos.forEach(c => {
+                    opts += `<option value="${c.id}" ${selectedValue === c.id ? 'selected' : ''}>${c.id} - ${c.titulo}</option>`;
+                });
+                opts += '</optgroup>';
+            }
+            if (appData.bugs && appData.bugs.length > 0) {
+                opts += '<optgroup label="Bugs / Defectos">';
+                appData.bugs.forEach(b => {
+                    opts += `<option value="${b.id}" ${selectedValue === b.id ? 'selected' : ''}>${b.id} - ${b.titulo}</option>`;
+                });
+                opts += '</optgroup>';
+            }
+            return opts;
+        };
+
+        // --- NUEVO: Renderizar imagen de Captura QA si está vinculada ---
+        const renderCaptura = (itemId) => {
+            if (!itemId) return '';
+            const cap = appData.capturas.find(c => c.vinculo === itemId && c.archivos);
+            if (cap) {
+                return `<div class="form-group" style="margin-top: 15px;">
+                    <label>📸 Captura QA Vinculada</label>
+                    <div style="background: var(--bg2); padding: 15px; border-radius: 8px; border: 1px solid var(--border); text-align: center;">
+                        <img src="${cap.archivos}" style="max-height: 250px; max-width: 100%; border-radius: 4px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
+                        <div style="margin-top: 8px; font-size: 0.85rem; color: var(--text2);">${cap.descripcion || 'Evidencia visual adjunta'} (ID: ${cap.id})</div>
+                    </div>
+                </div>`;
+            }
+            return '';
+        };
+
         let h = '';
         switch (page) {
             case 'proyectos':
@@ -564,7 +612,7 @@
       <div class="form-group"><label>Nombre *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
       <div class="form-group"><label>Código Cliente</label><input value="${item?.codigoCliente || ''}" ${d} id="f_codigoCliente"></div>
       <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-      <div class="form-group"><label>Responsable QA</label><input value="${item?.responsable || ''}" ${d} id="f_responsable"></div>
+      <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
       <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
       <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
       <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Planificado</option><option>Activo</option><option>Completado</option></select></div>`;
@@ -573,7 +621,7 @@
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'OBJ-' + Date.now()}" ${d} id="f_id"></div>
       <div class="form-group"><label>Objetivo *</label><input value="${item?.objetivo || ''}" ${d} id="f_objetivo"></div>
       <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-      <div class="form-group"><label>Responsable</label><input value="${item?.responsable || ''}" ${d} id="f_responsable"></div>
+      <div class="form-group"><label>Responsable</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
       <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
       <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
       <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Pendiente</option><option>En progreso</option><option>Finalizado</option></select></div>`;
@@ -603,7 +651,9 @@
       <div class="form-group"><label>Input del Cliente</label><input value="${item?.inputCliente || ''}" ${d} id="f_inputCliente"></div>
       <div class="form-group"><label>Criterios de Aceptación (BDD)</label><textarea ${d} id="f_criterios">${item?.criterios || ''}</textarea></div>
       <div class="form-group"><label>Resultado Esperado</label><textarea ${d} id="f_resultadoEsperado">${item?.resultadoEsperado || ''}</textarea></div>
-      <div class="form-group"><label>Estado de Ejecución</label><select ${d} id="f_estado"><option>Pendiente</option><option>Pasado</option><option>Fallido</option></select></div>`;
+      <div class="form-group"><label>Estado de Ejecución</label><select ${d} id="f_estado"><option>Pendiente</option><option>Pasado</option><option>Fallido</option></select></div>
+      <div class="form-group"><label>📝 Comentarios / Resultado Obtenido</label><textarea ${d} id="f_comentarios" placeholder="Añade aquí los resultados de la prueba...">${item?.comentarios || ''}</textarea></div>
+      ${renderCaptura(item?.id)}`; // Renderiza la captura vinculada
                 break;
             case 'bugs':
                 h += `<div class="form-group"><label>ID Bug</label><input value="${item?.id || 'BUG-' + Date.now()}" ${d} id="f_id"></div>
@@ -613,7 +663,9 @@
       <div class="form-group"><label>Resumen Técnico</label><textarea ${d} id="f_resumen">${item?.resumen || ''}</textarea></div>
       <div class="form-group"><label>Descripción Detallada</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
       <div class="form-group"><label>Severidad</label><select ${d} id="f_severidad"><option>Bloqueante</option><option>Crítica</option><option>Mayor</option><option>Menor</option></select></div>
-      <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Abierto</option><option>En revisión</option><option>Solucionado</option></select></div>`;
+      <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Abierto</option><option>En revisión</option><option>Solucionado</option></select></div>
+      <div class="form-group"><label>📝 Comentarios / Seguimiento</label><textarea ${d} id="f_comentarios" placeholder="Añade detalles sobre la resolución o hallazgos...">${item?.comentarios || ''}</textarea></div>
+      ${renderCaptura(item?.id)}`; // Renderiza la captura vinculada
                 break;
             case 'ejecuciones':
                 const casosDisponibles = filterByProject(appData.casos);
@@ -628,7 +680,8 @@
       <div class="form-group"><label>Nombre del Ciclo *</label><input value="${item?.nombreCiclo || ''}" ${d} id="f_nombreCiclo"></div>
       <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
       <div class="form-group"><label>Fecha</label><input type="date" value="${item?.fecha || ''}" ${d} id="f_fecha"></div>
-      <div class="form-group"><label>Responsable QA</label><input value="${item?.responsable || ''}" ${d} id="f_responsable"></div>
+      <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
+      <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>
       <div class="form-group"><label>Casos Asociados</label>
         <div class="checkbox-list">
           ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
@@ -643,21 +696,22 @@
                 break;
             case 'diario':
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'DIA-' + Date.now()}" ${d} id="f_id"></div>
-      <div class="form-group"><label>Colaborador QA</label><input value="${item?.colaborador || currentUser?.nombre || ''}" ${d} id="f_colaborador"></div>
+      <div class="form-group"><label>Colaborador QA</label><select ${d} id="f_colaborador">${userOpts(item?.colaborador || currentUser?.nombre)}</select></div>
       <div class="form-group"><label>Mes</label><input type="month" value="${item?.mes || ''}" ${d} id="f_mes"></div>
       <div class="form-group"><label>Fecha de la tarea</label><input type="date" value="${item?.fecha || ''}" ${d} id="f_fecha"></div>
       <div class="form-group"><label>Descripción de actividad</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
       <div class="form-group"><label>Horas invertidas</label><input type="number" step="0.5" value="${item?.horas || ''}" ${d} id="f_horas"></div>`;
                 break;
-            case 'capturas':
-                h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'CAP-' + Date.now()}" ${d} id="f_id"></div>
-      <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
-      <div class="form-group"><label>Vincular a Caso/Bug</label><input value="${item?.vinculo || ''}" ${d} id="f_vinculo"></div>
-      <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-      <div class="form-group"><label>Archivos (múltiples imágenes)</label>
-        <input type="file" id="f_archivos" multiple accept="image/*" ${d}>
-        <div id="archivosPreview" class="image-preview">${item?.archivos ? item.archivos.split(',').map(f => `<span>🖼️ ${f.trim()}</span>`).join('') : ''}</div>
-      </div>`;
+            case 'capturas': 
+                h += `<div class="form-group"><label>ID Captura</label><input value="${item?.id||'CAP-'+Date.now()}" id="f_id" ${d}></div>
+                      <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion||''}" id="f_descripcion" ${d}></div>
+                      <div class="form-group"><label>🔗 ID Caso o Bug Vinculado</label><select id="f_vinculo" ${d}>${getCasosBugsOpts(item?.vinculo)}</select></div>
+                      <div class="form-group">
+                          <label>Subir Imagen</label>
+                          <input type="file" id="f_archivos" accept="image/*" onchange="previsualizarCapturaQA(event, 'preview-box')" style="padding: 5px;" ${d}>
+                          <div id="preview-box">${item?.archivos ? `<img src="${item.archivos}" style="max-height: 180px; border-radius: 8px; margin-top:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">` : ''}</div>
+                          <input type="hidden" id="f_archivos_base64" value="${item?.archivos||''}">
+                      </div>`; 
                 break;
             case 'apis':
                 h += `<div class="form-group"><label>ID API</label><input value="${item?.id || 'API-' + Date.now()}" ${d} id="f_id"></div>
@@ -666,8 +720,8 @@
       <div class="form-group"><label>Método</label><select ${d} id="f_metodo"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></div>
       <div class="form-group"><label>Request</label><textarea ${d} id="f_request">${item?.request || ''}</textarea></div>
       <div class="form-group"><label>Response esperada</label><textarea ${d} id="f_respEsperada">${item?.respEsperada || ''}</textarea></div>
-      <div class="form-group"><label>Response obtenida</label><textarea ${d} id="f_respObtenida">${item?.respObtenida || ''}</textarea></div>
-      <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Correcta</option><option>Error</option><option>Pendiente</option></select></div>`;
+      <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Correcta</option><option>Error</option><option>Pendiente</option></select></div>
+      <div class="form-group"><label>📝 Comentarios de Validación</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre los resultados de la prueba de API...">${item?.comentarios || ''}</textarea></div>`;
                 break;
         }
         return h;
@@ -702,85 +756,65 @@
         }
     };
 
-    window.saveModal = function (page, id) {
+    window.saveModal = function(page, id) {
         const arr = getArrayForPage(page);
         const data = {};
-        if (page === 'usuarios') {
-            data.id = +document.getElementById('f_id')?.value || Date.now();
-            data.nombre = document.getElementById('f_nombre')?.value || '';
-            data.usuario = document.getElementById('f_usuario')?.value || '';
-            data.password = document.getElementById('f_password')?.value || '';
-            data.rol = document.getElementById('f_rol')?.value || 'Consultor';
-            if (!data.nombre || !data.usuario || !data.password) return toast('Nombre, usuario y contraseña obligatorios', 'error');
-        } else if (page === 'capturas') {
-            data.id = document.getElementById('f_id')?.value || '';
-            data.proyecto = document.getElementById('f_proyecto')?.value || '';
-            data.vinculo = document.getElementById('f_vinculo')?.value || '';
-            data.descripcion = document.getElementById('f_descripcion')?.value || '';
-            const fileInput = document.getElementById('f_archivos');
-            data.archivos = fileInput && fileInput.files.length
-                ? Array.from(fileInput.files).map(f => f.name).join(', ')
-                : (document.getElementById('archivosPreview')?.textContent || '');
-        } else if (page === 'ejecuciones') {
-            data.id = document.getElementById('f_id')?.value || '';
-            data.nombreCiclo = document.getElementById('f_nombreCiclo')?.value || '';
-            data.proyecto = document.getElementById('f_proyecto')?.value || '';
-            data.fecha = document.getElementById('f_fecha')?.value || '';
-            data.responsable = document.getElementById('f_responsable')?.value || '';
-            const checks = document.querySelectorAll('.caso-check:checked');
-            const casosSeleccionados = Array.from(checks).map(c => ({ id: c.value, status: 'Pendiente' }));
-
+        
+        // 1. Atrapa dinámicamente TODOS los campos del modal que empiecen por "f_"
+        const formElements = document.querySelectorAll('.modal [id^="f_"]');
+        formElements.forEach(el => {
+            const fieldName = el.id.replace('f_', '');
+            data[fieldName] = el.value;
+        });
+        
+        if(!data.id) return (typeof showToast === 'function' ? showToast('ID requerido','error') : toast('ID requerido','error'));
+    
+        // 2. REQUERIMIENTO CLAVE: Vincular al proyecto activo
+        const modulosConProyecto = ['casos', 'bugs', 'ejecuciones', 'capturas', 'diario', 'apis', 'objetivos', 'mejoras'];
+        if (modulosConProyecto.includes(page)) {
+            data.proyecto = getActiveProject(); // <-- Aquí forzamos que se guarde en el proyecto actual
+        }
+    
+        // 3. Lógica Especial (Ejecuciones Xray y Capturas Base64)
+        if (page === 'ejecuciones') {
+            const checked = Array.from(document.querySelectorAll('.exec-case-cb:checked')).map(cb => cb.value);
+            let oldCases = [];
             if (id) {
-                const existing = arr.find(x => x.id == id);
-                if (existing) {
-                    try {
-                        const existingCasos = JSON.parse(existing.casosAsociados || '[]');
-                        casosSeleccionados.forEach(nc => {
-                            const ex = existingCasos.find(ec => ec.id === nc.id);
-                            if (ex) nc.status = ex.status;
-                        });
-                    } catch (e) { }
-                }
+                const existingItem = arr.find(x=>x.id==id);
+                try { oldCases = JSON.parse(existingItem.casosAsociados || '[]'); } catch(e){}
             }
-            data.casosAsociados = JSON.stringify(casosSeleccionados);
-            if (!data.nombreCiclo) return toast('Nombre del ciclo obligatorio', 'error');
-        } else {
-            const fields = {
-                proyectos: ['id', 'nombre', 'codigoCliente', 'descripcion', 'responsable', 'fechaInicio', 'fechaFin', 'estado'],
-                objetivos: ['id', 'objetivo', 'descripcion', 'responsable', 'fechaInicio', 'fechaFin', 'estado'],
-                mejoras: ['id', 'titulo', 'tipo', 'descripcion', 'estado'],
-                casos: ['id', 'proyecto', 'prioridad', 'titulo', 'actor', 'descripcion', 'flujo', 'inputCliente', 'criterios', 'resultadoEsperado', 'estado'],
-                bugs: ['id', 'proyecto', 'casoRelacionado', 'titulo', 'resumen', 'descripcion', 'severidad', 'estado'],
-                diario: ['id', 'colaborador', 'mes', 'fecha', 'descripcion', 'horas'],
-                apis: ['id', 'nombre', 'endpoint', 'metodo', 'request', 'respEsperada', 'respObtenida', 'estado']
-            }[page] || [];
-            fields.forEach(f => data[f] = document.getElementById('f_' + f)?.value || '');
-            if (!data.id) return toast('ID requerido', 'error');
+            const newCasesData = checked.map(cId => {
+                const existing = oldCases.find(oc => oc.id === cId);
+                return { id: cId, status: existing ? existing.status : 'Pendiente' };
+            });
+            data.casosAsociados = JSON.stringify(newCasesData);
         }
-
-        if (id) {
-            const idx = arr.findIndex(x => x.id == id);
-            if (idx >= 0) {
-                arr[idx] = { ...arr[idx], ...data, fechaActualizacion: new Date().toISOString() };
-                addTrace(page, 'Modificación', data.id);
+    
+        if (page === 'capturas') {
+            const base64Input = document.getElementById('f_archivos_base64');
+            if (base64Input && base64Input.value) {
+                data.archivos = base64Input.value;
             }
-        } else {
-            if (arr.find(x => x.id === data.id)) return toast('ID duplicado', 'error');
-            data.fechaCreacion = new Date().toISOString();
-            arr.push(data);
-            addTrace(page, 'Creación', data.id);
-            if (page === 'proyectos' || page === 'usuarios') { saveData(); populateProjectSelector(); }
         }
-        if (page === 'bugs' && data.estado === 'Solucionado') {
-            addTrace('bugs', 'Cierre de bug', data.id);
-            addNotification('🐛 Bug solucionado', `${data.titulo} ha sido marcado como solucionado`);
+    
+        // 4. Guardar o Actualizar Array
+        if(id) {
+            const idx = arr.findIndex(x=>x.id==id);
+            if(idx>=0) arr[idx] = { ...arr[idx], ...data };
+        } else { 
+            arr.push(data); 
+            if(page==='proyectos') populateProjectSelector(); 
         }
-        saveData();
-        closeModal();
-        renderPage(currentPage);
-        toast('Guardado correctamente', 'success');
+        
+        saveData(); 
+        closeModal(); 
+        renderPage(currentPage); 
+        
+        if (typeof showToast === 'function') showToast('Guardado correctamente', 'success');
+        else if (typeof toast === 'function') toast('Guardado correctamente', 'success');
     };
 
+    
     function getArrayForPage(p) {
         return {
             proyectos: appData.proyectos,
@@ -880,6 +914,27 @@
         return h + '</div>';
     }
 
+    const itemsPerPage = 10; // Límite de elementos por página
+
+    function generarPaginador(totalItems, currentPage, funcionCambioPagina) {
+        const totalPages = Math.ceil(totalItems / itemsPerPage);
+        let htmlPaginador = '<div class="pagination" style="display: flex; gap: 8px; justify-content: center; margin-top: 20px;">';
+        
+        if (totalPages > 1) {
+            for (let i = 1; i <= totalPages; i++) {
+                const activeStyle = (i === currentPage) 
+                    ? 'background: var(--accent-blue); color: white; border-color: var(--accent-blue);' 
+                    : 'background: var(--card-bg); color: var(--text-main);';
+                    
+                htmlPaginador += `<button style="padding: 6px 12px; border-radius: 6px; border: 1px solid var(--card-border); cursor: pointer; ${activeStyle}" 
+                                    onclick="${funcionCambioPagina}(${i})">${i}</button>`;
+            }
+        }
+        
+        htmlPaginador += '</div>';
+        return htmlPaginador;
+    }
+
     // ============ DASHBOARD ============
     function renderDashboard() {
         const bugs = filterByProject(appData.bugs);
@@ -949,7 +1004,7 @@
             { label: 'Mayor', value: bugs.filter(b => b.severidad === 'Mayor').length, color: '#3b82f6' },
             { label: 'Menor', value: bugs.filter(b => b.severidad === 'Menor').length, color: '#10b981' }
         ])}
-  </div>`;
+  </div><br>`;
 
         const recentTraces = appData.trazabilidad.slice(-5).reverse();
         if (recentTraces.length > 0) {
@@ -1042,18 +1097,20 @@
         );
     }
 
-    function renderObjetivos() {
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Objetivo', field: 'objetivo' }, { label: 'Responsable', field: 'responsable' }, { label: 'Inicio', field: 'fechaInicio' }, { label: 'Fin', field: 'fechaFin' }, { label: 'Estado', field: 'estado' }];
-        return '<h1 class="page-title">🎯 Objetivos</h1>' + renderTable('objetivos', cols, appData.objetivos, i =>
-            `<td><code>${i.id}</code></td><td>${i.objetivo || ''}</td><td>${i.responsable || '-'}</td><td>${i.fechaInicio || '-'}</td><td>${i.fechaFin || '-'}</td><td><span class="badge ${i.estado === 'Finalizado' ? 'badge-success' : i.estado === 'En progreso' ? 'badge-info' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`
-        );
+    function renderObjetivos() { 
+        const data = filterByProject(appData.objetivos);
+        const cols = [{label:'ID'},{label:'Objetivo'},{label:'Responsable'},{label:'Inicio'},{label:'Fin'},{label:'Estado'}]; 
+        
+        return '<h1 class="page-title">🎯 Objetivos</h1>' + 
+            renderTable('objetivos', cols, data, i => `<td>${i.id}</td><td>${i.objetivo||''}</td><td>${i.responsable||'-'}</td><td>${i.fechaInicio||'-'}</td><td>${i.fechaFin||'-'}</td><td><span class="badge ${i.estado==='Finalizado'?'badge-success':i.estado==='En progreso'?'badge-info':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
     }
 
-    function renderMejoras() {
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Título', field: 'titulo' }, { label: 'Tipo', field: 'tipo' }, { label: 'Estado', field: 'estado' }];
-        return '<h1 class="page-title">💡 Propuestas</h1>' + renderTable('mejoras', cols, appData.mejoras, i =>
-            `<td><code>${i.id}</code></td><td><b>${i.titulo || ''}</b></td><td>${i.tipo || '-'}</td><td><span class="badge ${i.estado === 'Aprobado' ? 'badge-success' : i.estado === 'Descartado' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`
-        );
+    function renderMejoras() { 
+        const data = filterByProject(appData.mejoras);
+        const cols = [{label:'ID'},{label:'Título'},{label:'Tipo'},{label:'Estado'}]; 
+        
+        return '<h1 class="page-title">💡 Propuestas</h1>' + 
+            renderTable('mejoras', cols, data, i => `<td>${i.id}</td><td>${i.titulo||''}</td><td>${i.tipo||'-'}</td><td><span class="badge ${i.estado==='Aprobado'?'badge-success':i.estado==='Descartado'?'badge-danger':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
     }
 
     function renderUsuarios() {
@@ -1071,34 +1128,61 @@
         );
     }
 
-    function renderDiario() {
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Colaborador', field: 'colaborador' }, { label: 'Fecha', field: 'fecha' }, { label: 'Horas', field: 'horas' }];
-        const total = appData.registroDiario.reduce((s, i) => s + (+i.horas || 0), 0);
-        return '<h1 class="page-title">📝 Registro Diario</h1>' + renderTable('diario', cols, appData.registroDiario, i =>
-            `<td><code>${i.id}</code></td><td>${i.colaborador || '-'}</td><td>${i.fecha || '-'}</td><td><b>${i.horas || '0'}h</b></td>`
-        ) + `<div class="kpi-card" style="max-width:280px;"><div class="kpi-value">${total.toFixed(1)}h</div><div class="kpi-label">Total Horas</div></div>`;
+    function renderDiario() { 
+        // Ahora filtramos por el proyecto activo
+        const data = filterByProject(appData.registroDiario);
+        const cols = [{label:'ID'},{label:'Colaborador'},{label:'Fecha'},{label:'Horas'}]; 
+        const total = data.reduce((s,i) => s + (+i.horas || 0), 0); 
+        
+        return '<h1 class="page-title">📝 Registro Diario</h1>' + 
+            renderTable('diario', cols, data, i => `<td>${i.id}</td><td>${i.colaborador||'-'}</td><td>${i.fecha||'-'}</td><td>${i.horas||'0'}h</td>`) + 
+            `<div class="kpi-card" style="margin-top:20px; max-width: 250px;"><div class="kpi-value">${total}h</div><div class="kpi-label">Total Horas Proyecto</div></div>`; 
     }
 
     function renderCapturas() {
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Descripción', field: 'descripcion' }, { label: 'Vínculo', field: 'vinculo' }, { label: 'Archivos', field: 'archivos' }];
-        return '<h1 class="page-title">📸 Capturas QA</h1>' + renderTable('capturas', cols, appData.capturas, i =>
-            `<td><code>${i.id}</code></td><td>${i.descripcion || '-'}</td><td><code>${i.vinculo || '-'}</code></td><td>${i.archivos || '-'}</td>`
-        );
+        const data = filterByProject(appData.capturas);
+        const cols = [{label:'ID'},{label:'Descripción'},{label:'Vinculo'},{label:'Evidencia Visual'}];
+        
+        return '<h1 class="page-title">📸 Capturas QA</h1>' + renderTable('capturas', cols, data, i => {
+            // Si hay una imagen guardada, la renderizamos. Si le hacen clic, se abre en grande.
+            const imgHtml = i.archivos && i.archivos.startsWith('data:image') 
+                ? `<img src="${i.archivos}" style="height: 50px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);" onclick="window.open('${i.archivos}')">` 
+                : '<span style="color:var(--text2); font-size:0.8rem;">Sin imagen</span>';
+                
+            return `<td>${i.id}</td><td><b>${i.descripcion||'-'}</b></td><td><span class="badge badge-info">${i.vinculo||'-'}</span></td><td>${imgHtml}</td>`;
+        });
     }
 
-    function renderApis() {
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Nombre', field: 'nombre' }, { label: 'Endpoint', field: 'endpoint' }, { label: 'Método', field: 'metodo' }, { label: 'Estado', field: 'estado' }];
-        return '<h1 class="page-title">🔌 APIs</h1>' + renderTable('apis', cols, appData.apis, i =>
-            `<td><code>${i.id}</code></td><td><b>${i.nombre || '-'}</b></td><td><code>${i.endpoint || '-'}</code></td><td><span class="badge badge-purple">${i.metodo || 'GET'}</span></td><td><span class="badge ${i.estado === 'Correcta' ? 'badge-success' : i.estado === 'Error' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`
-        );
+    function renderApis() { 
+        const data = filterByProject(appData.apis);
+        const cols = [{label:'ID'},{label:'Nombre'},{label:'Endpoint'},{label:'Método'},{label:'Estado'}]; 
+        return '<h1 class="page-title">🔌 APIs</h1>' + 
+            renderTable('apis', cols, data, i => `<td>${i.id}</td><td>${i.nombre||'-'}</td><td>${i.endpoint||'-'}</td><td>${i.metodo||'GET'}</td><td><span class="badge ${i.estado==='Correcta'?'badge-success':i.estado==='Error'?'badge-danger':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
     }
 
     function renderTrazabilidad() {
         const cols = [{ label: 'Fecha', field: 'fechaHora' }, { label: 'Usuario', field: 'usuario' }, { label: 'Proyecto', field: 'proyecto' }, { label: 'Evento', field: 'tipoEvento' }, { label: 'Descripción', field: 'descripcion' }, { label: 'Entidad', field: 'entidadAfectada' }];
-        return '<h1 class="page-title"> Trazabilidad</h1>' + renderTable('trazabilidad', cols, appData.trazabilidad.slice().reverse(), i =>
+        return '<h1 class="page-title"> Trazabilidad</h1>' + '<button class="btn" style="background: var(--danger);" onclick="clearLogs()">🗑️ Limpiar Historial</button>' + renderTable('trazabilidad', cols, appData.trazabilidad.slice().reverse(), i =>
             `<td>${new Date(i.fechaHora).toLocaleString()}</td><td>${i.usuario || '-'}</td><td>${i.proyecto || '-'}</td><td><span class="badge badge-info">${i.tipoEvento || ''}</span></td><td>${i.descripcion || ''}</td><td><code>${i.entidadAfectada || '-'}</code></td>`, false
         );
     }
+
+    // Función para borrar los logs de trazabilidad
+    window.clearLogs = function() {
+        if (confirm('⚠️ ¿Estás seguro de que quieres borrar todos los logs de trazabilidad? Esta acción no se puede deshacer.')) {
+            // Limpiamos el array de trazabilidad
+            appData.trazabilidad = [];
+            
+            // Guardamos los cambios en localStorage
+            saveData();
+            
+            // Recargamos la página para que la tabla se vea vacía
+            renderPage('trazabilidad');
+            
+            toast('Logs eliminados correctamente', 'success');
+            addNotification('🗑️ Historial borrado', 'Se han eliminado todos los registros de trazabilidad');
+        }
+    };
 
     function renderBugs() {
         const data = filterByProject(appData.bugs).filter(b => b.estado !== 'Solucionado');
@@ -1162,7 +1246,7 @@
         </div>
         <div class="actions-cell">
           <button data-action="edit" data-id="${tp.id}" title="Editar">✏️</button>
-          <button data-action="delete" data-id="${tp.id}" title="Eliminar">️</button>
+          <button data-action="delete" data-id="${tp.id}" title="Eliminar">️🗑️</button>
         </div>
       </div>
 
@@ -1322,165 +1406,190 @@
         const casos = filterByProject(appData.casos);
         const bugs = filterByProject(appData.bugs);
         const ejecuciones = filterByProject(appData.ejecuciones);
+        
+        // --- NUEVO: Extraemos los datos de las APIs ---
+        const apis = filterByProject(appData.apis);
 
         const casosPasados = casos.filter(c => c.estado === 'Pasado').length;
         const casosFallidos = casos.filter(c => c.estado === 'Fallido').length;
         const cobertura = casos.length > 0 ? Math.round((casosPasados / casos.length) * 100) : 0;
         const bugsAbiertos = bugs.filter(b => b.estado !== 'Solucionado').length;
         const bugsSolucionados = bugs.filter(b => b.estado === 'Solucionado').length;
+        
+        // --- NUEVO: Calculamos métricas de APIs ---
+        const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
 
         const html = `
-  <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-  <head><meta charset="UTF-8"><title>Informe QA</title>
-  <style>
-    @page { size: A4; margin: 2cm; }
-    body { font-family: 'Calibri', Arial, sans-serif; color: #1e293b; line-height: 1.6; }
-    .cover { text-align: center; padding: 80px 40px; border-bottom: 4px solid #3b82f6; margin-bottom: 40px; }
-    .cover-logo { font-size: 72px; margin-bottom: 20px; }
-    .cover h1 { font-size: 36px; color: #0f172a; margin: 10px 0; font-weight: 700; }
-    .cover h2 { font-size: 20px; color: #64748b; font-weight: 400; margin: 8px 0; }
-    .cover-meta { margin-top: 40px; font-size: 14px; color: #64748b; }
-    .cover-meta div { margin: 6px 0; }
-    h1.section { color: #0f172a; font-size: 24px; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; margin-top: 40px; }
-    h2 { color: #1e40af; font-size: 18px; margin-top: 24px; }
-    p { font-size: 12px; margin: 8px 0; }
-    table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 11px; }
-    th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-weight: 600; }
-    td { border: 1px solid #e2e8f0; padding: 8px; }
-    tr:nth-child(even) td { background: #f8fafc; }
-    .badge { padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; display: inline-block; }
-    .passed { background: #d1fae5; color: #065f46; }
-    .failed { background: #fee2e2; color: #991b1b; }
-    .pendiente { background: #fef3c7; color: #92400e; }
-    .abierto { background: #fee2e2; color: #991b1b; }
-    .solucionado { background: #d1fae5; color: #065f46; }
-    .kpi-box { display: inline-block; padding: 16px 24px; margin: 8px; background: #f1f5f9; border-radius: 8px; border-left: 4px solid #3b82f6; min-width: 140px; }
-    .kpi-value { font-size: 28px; font-weight: 700; color: #0f172a; }
-    .kpi-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-    .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
-    .conclusion { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px; }
-    .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; text-align: center; }
-  </style></head>
-  <body>
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta charset="UTF-8"><title>Informe QA</title>
+        <style>
+            @page { size: A4; margin: 2cm; }
+            body { font-family: 'Calibri', Arial, sans-serif; color: #1e293b; line-height: 1.6; }
+            .cover { text-align: center; padding: 80px 40px; border-bottom: 4px solid #3b82f6; margin-bottom: 40px; }
+            .cover-logo { font-size: 72px; margin-bottom: 20px; }
+            .cover h1 { font-size: 36px; color: #0f172a; margin: 10px 0; font-weight: 700; }
+            .cover h2 { font-size: 20px; color: #64748b; font-weight: 400; margin: 8px 0; }
+            .cover-meta { margin-top: 40px; font-size: 14px; color: #64748b; }
+            .cover-meta div { margin: 6px 0; }
+            h1.section { color: #0f172a; font-size: 24px; border-bottom: 2px solid #3b82f6; padding-bottom: 8px; margin-top: 40px; }
+            h2 { color: #1e40af; font-size: 18px; margin-top: 24px; }
+            p { font-size: 12px; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 11px; }
+            th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-weight: 600; }
+            td { border: 1px solid #e2e8f0; padding: 8px; }
+            tr:nth-child(even) td { background: #f8fafc; }
+            .badge { padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; display: inline-block; }
+            .passed { background: #d1fae5; color: #065f46; }
+            .failed { background: #fee2e2; color: #991b1b; }
+            .pendiente { background: #fef3c7; color: #92400e; }
+            .abierto { background: #fee2e2; color: #991b1b; }
+            .solucionado { background: #d1fae5; color: #065f46; }
+            .kpi-box { display: inline-block; padding: 16px 24px; margin: 8px; background: #f1f5f9; border-radius: 8px; border-left: 4px solid #3b82f6; min-width: 140px; }
+            .kpi-value { font-size: 28px; font-weight: 700; color: #0f172a; }
+            .kpi-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+            .conclusion { background: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px; }
+            .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; text-align: center; }
+        </style></head>
+        <body>
 
-  <div class="cover">
-    <div class="cover-logo">🛡️</div>
-    <h1>Informe de Aseguramiento de Calidad</h1>
-    <h2>Quality Assurance / Quality Control</h2>
-    <div class="cover-meta">
-      <div><strong>Proyecto:</strong> ${proyecto?.nombre || 'Todos los proyectos'}</div>
-      <div><strong>Cliente:</strong> ${proyecto?.codigoCliente || 'N/A'}</div>
-      <div><strong>Responsable QA:</strong> ${proyecto?.responsable || currentUser?.nombre || 'N/A'}</div>
-      <div><strong>Fecha de emisión:</strong> ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
-      <div><strong>Versión:</strong> 1.0</div>
-    </div>
-  </div>
+        <div class="cover">
+            <div class="cover-logo">🛡️</div>
+            <h1>Informe de Aseguramiento de Calidad</h1>
+            <h2>Quality Assurance / Quality Control</h2>
+            <div class="cover-meta">
+            <div><strong>Proyecto:</strong> ${proyecto?.nombre || 'Todos los proyectos'}</div>
+            <div><strong>Cliente:</strong> ${proyecto?.codigoCliente || 'N/A'}</div>
+            <div><strong>Responsable QA:</strong> ${proyecto?.responsable || currentUser?.nombre || 'N/A'}</div>
+            <div><strong>Fecha de emisión:</strong> ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+            <div><strong>Versión:</strong> 1.0</div>
+            </div>
+        </div>
 
-  <h1 class="section">1. Resumen Ejecutivo</h1>
-  <p>El presente documento recoge los resultados de las actividades de aseguramiento de calidad realizadas sobre el proyecto <strong>${proyecto?.nombre || 'en curso'}</strong>. Se detallan los casos de prueba ejecutados, los defectos identificados y el estado general de calidad del producto.</p>
+        <h1 class="section">1. Resumen Ejecutivo</h1>
+        <p>El presente documento recoge los resultados de las actividades de aseguramiento de calidad realizadas sobre el proyecto <strong>${proyecto?.nombre || 'en curso'}</strong>. Se detallan los casos de prueba ejecutados, los defectos identificados, la validación de APIs y el estado general de calidad del producto.</p>
 
-  <div class="summary-grid">
-    <div class="kpi-box">
-      <div class="kpi-value">${casos.length}</div>
-      <div class="kpi-label">Casos Totales</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-value">${cobertura}%</div>
-      <div class="kpi-label">Cobertura</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-value">${bugs.length}</div>
-      <div class="kpi-label">Defectos</div>
-    </div>
-    <div class="kpi-box">
-      <div class="kpi-value">${bugsSolucionados}</div>
-      <div class="kpi-label">Resueltos</div>
-    </div>
-  </div>
+        <div class="summary-grid">
+            <div class="kpi-box">
+            <div class="kpi-value">${casos.length}</div>
+            <div class="kpi-label">Casos Totales</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${cobertura}%</div>
+            <div class="kpi-label">Cobertura</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${bugs.length}</div>
+            <div class="kpi-label">Defectos</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${apis.length}</div>
+            <div class="kpi-label">APIs Evaluadas</div>
+            </div>
+        </div>
 
-  <h1 class="section">2. Métricas de Calidad</h1>
-  <table>
-    <tr><th>Indicador</th><th>Valor</th><th>Estado</th></tr>
-    <tr><td>Cobertura de pruebas</td><td>${cobertura}%</td><td><span class="badge ${cobertura >= 80 ? 'passed' : cobertura >= 50 ? 'pendiente' : 'failed'}">${cobertura >= 80 ? 'Óptimo' : cobertura >= 50 ? 'Mejorable' : 'Crítico'}</span></td></tr>
-    <tr><td>Casos ejecutados</td><td>${casosPasados + casosFallidos} / ${casos.length}</td><td>-</td></tr>
-    <tr><td>Tasa de defectos</td><td>${casos.length > 0 ? Math.round((bugs.length / casos.length) * 100) : 0}%</td><td>-</td></tr>
-    <tr><td>Bugs abiertos</td><td>${bugsAbiertos}</td><td><span class="badge ${bugsAbiertos === 0 ? 'passed' : 'failed'}">${bugsAbiertos === 0 ? 'Sin incidencias' : 'Requiere atención'}</span></td></tr>
-    <tr><td>Bugs solucionados</td><td>${bugsSolucionados}</td><td>-</td></tr>
-  </table>
+        <h1 class="section">2. Métricas de Calidad</h1>
+        <table>
+            <tr><th>Indicador</th><th>Valor</th><th>Estado</th></tr>
+            <tr><td>Cobertura de pruebas</td><td>${cobertura}%</td><td><span class="badge ${cobertura >= 80 ? 'passed' : cobertura >= 50 ? 'pendiente' : 'failed'}">${cobertura >= 80 ? 'Óptimo' : cobertura >= 50 ? 'Mejorable' : 'Crítico'}</span></td></tr>
+            <tr><td>Casos ejecutados</td><td>${casosPasados + casosFallidos} / ${casos.length}</td><td>-</td></tr>
+            <tr><td>Tasa de defectos</td><td>${casos.length > 0 ? Math.round((bugs.length / casos.length) * 100) : 0}%</td><td>-</td></tr>
+            <tr><td>Bugs abiertos</td><td>${bugsAbiertos}</td><td><span class="badge ${bugsAbiertos === 0 ? 'passed' : 'failed'}">${bugsAbiertos === 0 ? 'Sin incidencias' : 'Requiere atención'}</span></td></tr>
+            <tr><td>APIs correctas</td><td>${apisCorrectas} / ${apis.length}</td><td><span class="badge ${apis.length > 0 && apisCorrectas === apis.length ? 'passed' : apis.length === 0 ? 'pendiente' : 'failed'}">${apis.length > 0 && apisCorrectas === apis.length ? '100% OK' : apis.length === 0 ? 'N/A' : 'Errores detectados'}</span></td></tr>
+        </table>
 
-  <h1 class="section">3. Casos de Uso</h1>
-  <p>Se han definido <strong>${casos.length}</strong> casos de prueba, de los cuales <strong>${casosPasados}</strong> han sido ejecutados satisfactoriamente y <strong>${casosFallidos}</strong> han presentado fallos.</p>
-  <table>
-    <tr><th>ID</th><th>Título</th><th>Prioridad</th><th>Actor</th><th>Estado</th></tr>
-    ${casos.map(c => `<tr>
-      <td>${c.id}</td>
-      <td>${c.titulo || ''}</td>
-      <td>${c.prioridad || 'Media'}</td>
-      <td>${c.actor || '-'}</td>
-      <td><span class="badge ${c.estado === 'Pasado' ? 'passed' : c.estado === 'Fallido' ? 'failed' : 'pendiente'}">${c.estado || 'Pendiente'}</span></td>
-    </tr>`).join('')}
-  </table>
+        <h1 class="section">3. Casos de Uso</h1>
+        <p>Se han definido <strong>${casos.length}</strong> casos de prueba, de los cuales <strong>${casosPasados}</strong> han sido ejecutados satisfactoriamente y <strong>${casosFallidos}</strong> han presentado fallos.</p>
+        <table>
+            <tr><th>ID</th><th>Título</th><th>Prioridad</th><th>Actor</th><th>Estado</th></tr>
+            ${casos.map(c => `<tr>
+            <td>${c.id}</td>
+            <td>${c.titulo || ''}</td>
+            <td>${c.prioridad || 'Media'}</td>
+            <td>${c.actor || '-'}</td>
+            <td><span class="badge ${c.estado === 'Pasado' ? 'passed' : c.estado === 'Fallido' ? 'failed' : 'pendiente'}">${c.estado || 'Pendiente'}</span></td>
+            </tr>`).join('')}
+        </table>
 
-  <h1 class="section">4. Defectos Detectados</h1>
-  <p>Se han registrado <strong>${bugs.length}</strong> defectos durante las pruebas. De estos, <strong>${bugsSolucionados}</strong> han sido resueltos y <strong>${bugsAbiertos}</strong> permanecen abiertos.</p>
-  <table>
-    <tr><th>ID</th><th>Título</th><th>Severidad</th><th>Caso</th><th>Estado</th></tr>
-    ${bugs.map(b => `<tr>
-      <td>${b.id}</td>
-      <td>${b.titulo || ''}</td>
-      <td>${b.severidad || 'Menor'}</td>
-      <td>${b.casoRelacionado || '-'}</td>
-      <td><span class="badge ${b.estado === 'Solucionado' ? 'solucionado' : 'abierto'}">${b.estado || 'Abierto'}</span></td>
-    </tr>`).join('')}
-  </table>
+        <h1 class="section">4. Defectos Detectados</h1>
+        <p>Se han registrado <strong>${bugs.length}</strong> defectos durante las pruebas. De estos, <strong>${bugsSolucionados}</strong> han sido resueltos y <strong>${bugsAbiertos}</strong> permanecen abiertos.</p>
+        <table>
+            <tr><th>ID</th><th>Título</th><th>Severidad</th><th>Caso</th><th>Estado</th></tr>
+            ${bugs.map(b => `<tr>
+            <td>${b.id}</td>
+            <td>${b.titulo || ''}</td>
+            <td>${b.severidad || 'Menor'}</td>
+            <td>${b.casoRelacionado || '-'}</td>
+            <td><span class="badge ${b.estado === 'Solucionado' ? 'solucionado' : 'abierto'}">${b.estado || 'Abierto'}</span></td>
+            </tr>`).join('')}
+        </table>
 
-  <h1 class="section">5. Ejecuciones de Pruebas</h1>
-  <p>Se han realizado <strong>${ejecuciones.length}</strong> ciclos de ejecución de pruebas.</p>
-  <table>
-    <tr><th>ID</th><th>Ciclo</th><th>Fecha</th><th>Responsable</th><th>Casos</th></tr>
-    ${ejecuciones.map(e => {
-            let casosCount = 0;
-            try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
-            return `<tr>
-        <td>${e.id}</td>
-        <td>${e.nombreCiclo || ''}</td>
-        <td>${e.fecha || '-'}</td>
-        <td>${e.responsable || '-'}</td>
-        <td>${casosCount}</td>
-      </tr>`;
-        }).join('')}
-  </table>
+        <h1 class="section">5. Ejecuciones de Pruebas</h1>
+        <p>Se han realizado <strong>${ejecuciones.length}</strong> ciclos de ejecución de pruebas.</p>
+        <table>
+            <tr><th>ID</th><th>Ciclo</th><th>Fecha</th><th>Responsable</th><th>Casos</th></tr>
+            ${ejecuciones.map(e => {
+                    let casosCount = 0;
+                    try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
+                    return `<tr>
+                <td>${e.id}</td>
+                <td>${e.nombreCiclo || ''}</td>
+                <td>${e.fecha || '-'}</td>
+                <td>${e.responsable || '-'}</td>
+                <td>${casosCount}</td>
+            </tr>`;
+                }).join('')}
+        </table>
 
-  <h1 class="section">6. Conclusiones y Recomendaciones</h1>
-  <div class="conclusion">
-    <p><strong>Estado general de calidad:</strong> ${cobertura >= 80 && bugsAbiertos === 0 ? '✅ <strong>Óptimo</strong> - El producto cumple con los estándares de calidad establecidos.' :
-                cobertura >= 50 ? '⚠️ <strong>Mejorable</strong> - Se recomienda incrementar la cobertura de pruebas y resolver los defectos pendientes.' :
-                    '🚨 <strong>Crítico</strong> - Se requiere atención inmediata. La cobertura de pruebas es insuficiente y hay defectos abiertos.'
-            }</p>
-    <p style="margin-top:12px;"><strong>Recomendaciones:</strong></p>
-    <ul style="margin-left:20px;">
-      ${bugsAbiertos > 0 ? '<li>Priorizar la resolución de los ' + bugsAbiertos + ' defectos abiertos.</li>' : ''}
-      ${cobertura < 80 ? '<li>Incrementar la cobertura de pruebas hasta alcanzar al menos el 80%.</li>' : ''}
-      <li>Continuar con el seguimiento diario de las métricas de calidad.</li>
-      <li>Documentar todas las evidencias de prueba para auditorías futuras.</li>
-    </ul>
-  </div>
+        <h1 class="section">6. Gestión de APIs</h1>
+        <p>Se han validado <strong>${apis.length}</strong> endpoints/APIs, encontrando <strong>${apisCorrectas}</strong> con respuesta correcta.</p>
+        <table>
+            <tr><th>ID API</th><th>Nombre</th><th>Método</th><th>Endpoint</th><th>Estado</th></tr>
+            ${apis.map(a => `<tr>
+            <td>${a.id}</td>
+            <td>${a.nombre || ''}</td>
+            <td><strong>${a.metodo || 'GET'}</strong></td>
+            <td>${a.endpoint || '-'}</td>
+            <td><span class="badge ${a.estado === 'Correcta' ? 'passed' : a.estado === 'Error' ? 'failed' : 'pendiente'}">${a.estado || 'Pendiente'}</span></td>
+            </tr>`).join('')}
+        </table>
 
-  <div class="footer">
-    <p>Informe generado por QA Suite PRO · ${new Date().toLocaleString('es-ES')}</p>
-    <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
-  </div>
+        <h1 class="section">7. Conclusiones y Recomendaciones</h1>
+        <div class="conclusion">
+            <p><strong>Estado general de calidad:</strong> ${cobertura >= 80 && bugsAbiertos === 0 ? '✅ <strong>Óptimo</strong> - El producto cumple con los estándares de calidad establecidos.' :
+                        cobertura >= 50 ? '⚠️ <strong>Mejorable</strong> - Se recomienda incrementar la cobertura de pruebas y resolver los defectos pendientes.' :
+                            '🚨 <strong>Crítico</strong> - Se requiere atención inmediata. La cobertura de pruebas es insuficiente y hay defectos abiertos.'
+                    }</p>
+            <p style="margin-top:12px;"><strong>Recomendaciones:</strong></p>
+            <ul style="margin-left:20px;">
+            ${bugsAbiertos > 0 ? '<li>Priorizar la resolución de los ' + bugsAbiertos + ' defectos abiertos.</li>' : ''}
+            ${apis.length > 0 && apisCorrectas < apis.length ? `<li>Revisar los ${apis.length - apisCorrectas} endpoints que han reportado error o siguen pendientes de validación.</li>` : ''}
+            ${cobertura < 80 ? '<li>Incrementar la cobertura de pruebas hasta alcanzar al menos el 80%.</li>' : ''}
+            <li>Continuar con el seguimiento diario de las métricas de calidad.</li>
+            <li>Documentar todas las evidencias de prueba para auditorías futuras.</li>
+            </ul>
+        </div>
 
-  </body></html>`;
+        <div class="footer">
+            <p>Informe generado por QA Suite PRO · ${new Date().toLocaleString('es-ES')}</p>
+            <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
+        </div>
 
-        const blob = new Blob(['\ufeff' + html], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+        </body></html>`;
+
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
-        a.download = `Informe_QA_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.docx`;
+        a.download = `Informe_QA_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
+        
         a.click();
+        
+        URL.revokeObjectURL(a.href);
+        
         toast('📄 Informe profesional descargado', 'success');
         addNotification(' Informe generado', 'Se ha descargado un nuevo informe de calidad');
     }
+
 
     function exportData() {
         const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
@@ -1526,12 +1635,39 @@
         }
     });
 
+    // Evitar cierre de modales al clicar en el overlay
+    window.addEventListener('click', function (event) {
+        if (event.target.classList.contains('modal-overlay')) {
+            // Al interceptar el clic y no llamar a ninguna función de cierre,
+            // obligamos a usar los botones explícitos de "Cerrar" o "Cancelar".
+            event.stopPropagation();
+        }
+    });
+
+    window.previsualizarCapturaQA = function(event, containerId) {
+        const file = event.target.files[0];
+        const container = document.getElementById(containerId);
+        const hiddenInput = document.getElementById('f_archivos_base64'); // Input oculto para guardar la data
+    
+        if (file && file.type.startsWith('image/')) {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const base64Data = e.target.result;
+                // Mostramos la miniatura en el modal
+                container.innerHTML = `<img src="${base64Data}" style="max-width: 100%; max-height: 180px; border-radius: 8px; border: 1px solid var(--border); margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">`;
+                // Guardamos la cadena base64 en el input oculto
+                if(hiddenInput) hiddenInput.value = base64Data;
+            };
+            reader.readAsDataURL(file);
+        }
+    };
+
     // ============ INIT ============
     function init() {
         loadData();
         if (appData.usuarios.length === 0) {
             appData.usuarios.push();
-            appData.proyectos.push( );
+            appData.proyectos.push();
             appData.objetivos.push();
 
             appData.capturas.push();
