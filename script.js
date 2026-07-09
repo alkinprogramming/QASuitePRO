@@ -379,13 +379,13 @@
         );
     }
 
-    window.navigateTo = function(page) {
+    window.navigateTo = function (page) {
         if (currentUser.rol === 'Consultor' && !consultorPages.includes(page)) {
             toast('No tienes permiso para acceder a esta sección', 'error');
             return;
         }
         if (projectRequiredPages.includes(page) && !getActiveProject()) {
-            toast('⚠️ Selecciona un proyecto activo primero', 'warning');
+            toast('Selecciona un proyecto activo primero', 'warning');
             page = 'dashboard';
         }
         currentPage = page;
@@ -501,7 +501,7 @@
         const html = `
     <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
       <div class="modal confirm-modal">
-        <div class="icon-warning">⚠️</div>
+        <div class="icon-warning"></div>
         <p style="margin-bottom:20px; font-size:1rem; line-height:1.5; color:var(--text);">${message}</p>
         <div class="modal-actions" style="justify-content:center;">
           <button class="btn btn-outline" id="confirmCancelBtn">Cancelar</button>
@@ -557,12 +557,12 @@
         const projOpts = appData.proyectos.map(p =>
             `<option ${item?.proyecto === p.id ? 'selected' : ''}>${p.id}</option>`
         ).join('');
-        
+
         // --- Generador de opciones de usuarios ---
         const userOpts = (selectedValue) => {
             let opts = '<option value="">Seleccionar responsable...</option>';
             if (appData.usuarios && appData.usuarios.length > 0) {
-                opts += appData.usuarios.map(u => 
+                opts += appData.usuarios.map(u =>
                     `<option value="${u.nombre}" ${selectedValue === u.nombre ? 'selected' : ''}>${u.nombre}</option>`
                 ).join('');
             }
@@ -702,16 +702,16 @@
       <div class="form-group"><label>Descripción de actividad</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
       <div class="form-group"><label>Horas invertidas</label><input type="number" step="0.5" value="${item?.horas || ''}" ${d} id="f_horas"></div>`;
                 break;
-            case 'capturas': 
-                h += `<div class="form-group"><label>ID Captura</label><input value="${item?.id||'CAP-'+Date.now()}" id="f_id" ${d}></div>
-                      <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion||''}" id="f_descripcion" ${d}></div>
+            case 'capturas':
+                h += `<div class="form-group"><label>ID Captura</label><input value="${item?.id || 'CAP-' + Date.now()}" id="f_id" ${d}></div>
+                      <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion || ''}" id="f_descripcion" ${d}></div>
                       <div class="form-group"><label>🔗 ID Caso o Bug Vinculado</label><select id="f_vinculo" ${d}>${getCasosBugsOpts(item?.vinculo)}</select></div>
                       <div class="form-group">
                           <label>Subir Imagen</label>
                           <input type="file" id="f_archivos" accept="image/*" onchange="previsualizarCapturaQA(event, 'preview-box')" style="padding: 5px;" ${d}>
                           <div id="preview-box">${item?.archivos ? `<img src="${item.archivos}" style="max-height: 180px; border-radius: 8px; margin-top:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">` : ''}</div>
-                          <input type="hidden" id="f_archivos_base64" value="${item?.archivos||''}">
-                      </div>`; 
+                          <input type="hidden" id="f_archivos_base64" value="${item?.archivos || ''}">
+                      </div>`;
                 break;
             case 'apis':
                 h += `<div class="form-group"><label>ID API</label><input value="${item?.id || 'API-' + Date.now()}" ${d} id="f_id"></div>
@@ -756,32 +756,32 @@
         }
     };
 
-    window.saveModal = function(page, id) {
+    window.saveModal = function (page, id) {
         const arr = getArrayForPage(page);
         const data = {};
-        
+
         // 1. Atrapa dinámicamente TODOS los campos del modal que empiecen por "f_"
         const formElements = document.querySelectorAll('.modal [id^="f_"]');
         formElements.forEach(el => {
             const fieldName = el.id.replace('f_', '');
             data[fieldName] = el.value;
         });
-        
-        if(!data.id) return (typeof showToast === 'function' ? showToast('ID requerido','error') : toast('ID requerido','error'));
-    
+
+        if (!data.id) return (typeof showToast === 'function' ? showToast('ID requerido', 'error') : toast('ID requerido', 'error'));
+
         // 2. REQUERIMIENTO CLAVE: Vincular al proyecto activo
         const modulosConProyecto = ['casos', 'bugs', 'ejecuciones', 'capturas', 'diario', 'apis', 'objetivos', 'mejoras'];
         if (modulosConProyecto.includes(page)) {
             data.proyecto = getActiveProject(); // <-- Aquí forzamos que se guarde en el proyecto actual
         }
-    
+
         // 3. Lógica Especial (Ejecuciones Xray y Capturas Base64)
         if (page === 'ejecuciones') {
             const checked = Array.from(document.querySelectorAll('.exec-case-cb:checked')).map(cb => cb.value);
             let oldCases = [];
             if (id) {
-                const existingItem = arr.find(x=>x.id==id);
-                try { oldCases = JSON.parse(existingItem.casosAsociados || '[]'); } catch(e){}
+                const existingItem = arr.find(x => x.id == id);
+                try { oldCases = JSON.parse(existingItem.casosAsociados || '[]'); } catch (e) { }
             }
             const newCasesData = checked.map(cId => {
                 const existing = oldCases.find(oc => oc.id === cId);
@@ -789,32 +789,32 @@
             });
             data.casosAsociados = JSON.stringify(newCasesData);
         }
-    
+
         if (page === 'capturas') {
             const base64Input = document.getElementById('f_archivos_base64');
             if (base64Input && base64Input.value) {
                 data.archivos = base64Input.value;
             }
         }
-    
+
         // 4. Guardar o Actualizar Array
-        if(id) {
-            const idx = arr.findIndex(x=>x.id==id);
-            if(idx>=0) arr[idx] = { ...arr[idx], ...data };
-        } else { 
-            arr.push(data); 
-            if(page==='proyectos') populateProjectSelector(); 
+        if (id) {
+            const idx = arr.findIndex(x => x.id == id);
+            if (idx >= 0) arr[idx] = { ...arr[idx], ...data };
+        } else {
+            arr.push(data);
+            if (page === 'proyectos') populateProjectSelector();
         }
-        
-        saveData(); 
-        closeModal(); 
-        renderPage(currentPage); 
-        
+
+        saveData();
+        closeModal();
+        renderPage(currentPage);
+
         if (typeof showToast === 'function') showToast('Guardado correctamente', 'success');
         else if (typeof toast === 'function') toast('Guardado correctamente', 'success');
     };
 
-    
+
     function getArrayForPage(p) {
         return {
             proyectos: appData.proyectos,
@@ -919,18 +919,18 @@
     function generarPaginador(totalItems, currentPage, funcionCambioPagina) {
         const totalPages = Math.ceil(totalItems / itemsPerPage);
         let htmlPaginador = '<div class="pagination" style="display: flex; gap: 8px; justify-content: center; margin-top: 20px;">';
-        
+
         if (totalPages > 1) {
             for (let i = 1; i <= totalPages; i++) {
-                const activeStyle = (i === currentPage) 
-                    ? 'background: var(--accent-blue); color: white; border-color: var(--accent-blue);' 
+                const activeStyle = (i === currentPage)
+                    ? 'background: var(--accent-blue); color: white; border-color: var(--accent-blue);'
                     : 'background: var(--card-bg); color: var(--text-main);';
-                    
+
                 htmlPaginador += `<button style="padding: 6px 12px; border-radius: 6px; border: 1px solid var(--card-border); cursor: pointer; ${activeStyle}" 
                                     onclick="${funcionCambioPagina}(${i})">${i}</button>`;
             }
         }
-        
+
         htmlPaginador += '</div>';
         return htmlPaginador;
     }
@@ -1097,20 +1097,20 @@
         );
     }
 
-    function renderObjetivos() { 
+    function renderObjetivos() {
         const data = filterByProject(appData.objetivos);
-        const cols = [{label:'ID'},{label:'Objetivo'},{label:'Responsable'},{label:'Inicio'},{label:'Fin'},{label:'Estado'}]; 
-        
-        return '<h1 class="page-title">🎯 Objetivos</h1>' + 
-            renderTable('objetivos', cols, data, i => `<td>${i.id}</td><td>${i.objetivo||''}</td><td>${i.responsable||'-'}</td><td>${i.fechaInicio||'-'}</td><td>${i.fechaFin||'-'}</td><td><span class="badge ${i.estado==='Finalizado'?'badge-success':i.estado==='En progreso'?'badge-info':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
+        const cols = [{ label: 'ID' }, { label: 'Objetivo' }, { label: 'Responsable' }, { label: 'Inicio' }, { label: 'Fin' }, { label: 'Estado' }];
+
+        return '<h1 class="page-title">🎯 Objetivos</h1>' +
+            renderTable('objetivos', cols, data, i => `<td>${i.id}</td><td>${i.objetivo || ''}</td><td>${i.responsable || '-'}</td><td>${i.fechaInicio || '-'}</td><td>${i.fechaFin || '-'}</td><td><span class="badge ${i.estado === 'Finalizado' ? 'badge-success' : i.estado === 'En progreso' ? 'badge-info' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
     }
 
-    function renderMejoras() { 
+    function renderMejoras() {
         const data = filterByProject(appData.mejoras);
-        const cols = [{label:'ID'},{label:'Título'},{label:'Tipo'},{label:'Estado'}]; 
-        
-        return '<h1 class="page-title">💡 Propuestas</h1>' + 
-            renderTable('mejoras', cols, data, i => `<td>${i.id}</td><td>${i.titulo||''}</td><td>${i.tipo||'-'}</td><td><span class="badge ${i.estado==='Aprobado'?'badge-success':i.estado==='Descartado'?'badge-danger':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
+        const cols = [{ label: 'ID' }, { label: 'Título' }, { label: 'Tipo' }, { label: 'Estado' }];
+
+        return '<h1 class="page-title">💡 Propuestas</h1>' +
+            renderTable('mejoras', cols, data, i => `<td>${i.id}</td><td>${i.titulo || ''}</td><td>${i.tipo || '-'}</td><td><span class="badge ${i.estado === 'Aprobado' ? 'badge-success' : i.estado === 'Descartado' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
     }
 
     function renderUsuarios() {
@@ -1128,36 +1128,36 @@
         );
     }
 
-    function renderDiario() { 
+    function renderDiario() {
         // Ahora filtramos por el proyecto activo
         const data = filterByProject(appData.registroDiario);
-        const cols = [{label:'ID'},{label:'Colaborador'},{label:'Fecha'},{label:'Horas'}]; 
-        const total = data.reduce((s,i) => s + (+i.horas || 0), 0); 
-        
-        return '<h1 class="page-title">📝 Registro Diario</h1>' + 
-            renderTable('diario', cols, data, i => `<td>${i.id}</td><td>${i.colaborador||'-'}</td><td>${i.fecha||'-'}</td><td>${i.horas||'0'}h</td>`) + 
-            `<div class="kpi-card" style="margin-top:20px; max-width: 250px;"><div class="kpi-value">${total}h</div><div class="kpi-label">Total Horas Proyecto</div></div>`; 
+        const cols = [{ label: 'ID' }, { label: 'Colaborador' }, { label: 'Fecha' }, { label: 'Horas' }];
+        const total = data.reduce((s, i) => s + (+i.horas || 0), 0);
+
+        return '<h1 class="page-title">📝 Registro Diario</h1>' +
+            renderTable('diario', cols, data, i => `<td>${i.id}</td><td>${i.colaborador || '-'}</td><td>${i.fecha || '-'}</td><td>${i.horas || '0'}h</td>`) +
+            `<div class="kpi-card" style="margin-top:20px; max-width: 250px;"><div class="kpi-value">${total}h</div><div class="kpi-label">Total Horas Proyecto</div></div>`;
     }
 
     function renderCapturas() {
         const data = filterByProject(appData.capturas);
-        const cols = [{label:'ID'},{label:'Descripción'},{label:'Vinculo'},{label:'Evidencia Visual'}];
-        
+        const cols = [{ label: 'ID' }, { label: 'Descripción' }, { label: 'Vinculo' }, { label: 'Evidencia Visual' }];
+
         return '<h1 class="page-title">📸 Capturas QA</h1>' + renderTable('capturas', cols, data, i => {
             // Si hay una imagen guardada, la renderizamos. Si le hacen clic, se abre en grande.
-            const imgHtml = i.archivos && i.archivos.startsWith('data:image') 
-                ? `<img src="${i.archivos}" style="height: 50px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);" onclick="window.open('${i.archivos}')">` 
+            const imgHtml = i.archivos && i.archivos.startsWith('data:image')
+                ? `<img src="${i.archivos}" style="height: 50px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);" onclick="window.open('${i.archivos}')">`
                 : '<span style="color:var(--text2); font-size:0.8rem;">Sin imagen</span>';
-                
-            return `<td>${i.id}</td><td><b>${i.descripcion||'-'}</b></td><td><span class="badge badge-info">${i.vinculo||'-'}</span></td><td>${imgHtml}</td>`;
+
+            return `<td>${i.id}</td><td><b>${i.descripcion || '-'}</b></td><td><span class="badge badge-info">${i.vinculo || '-'}</span></td><td>${imgHtml}</td>`;
         });
     }
 
-    function renderApis() { 
+    function renderApis() {
         const data = filterByProject(appData.apis);
-        const cols = [{label:'ID'},{label:'Nombre'},{label:'Endpoint'},{label:'Método'},{label:'Estado'}]; 
-        return '<h1 class="page-title">🔌 APIs</h1>' + 
-            renderTable('apis', cols, data, i => `<td>${i.id}</td><td>${i.nombre||'-'}</td><td>${i.endpoint||'-'}</td><td>${i.metodo||'GET'}</td><td><span class="badge ${i.estado==='Correcta'?'badge-success':i.estado==='Error'?'badge-danger':'badge-warning'}">${i.estado||'Pendiente'}</span></td>`); 
+        const cols = [{ label: 'ID' }, { label: 'Nombre' }, { label: 'Endpoint' }, { label: 'Método' }, { label: 'Estado' }];
+        return '<h1 class="page-title">🔌 APIs</h1>' +
+            renderTable('apis', cols, data, i => `<td>${i.id}</td><td>${i.nombre || '-'}</td><td>${i.endpoint || '-'}</td><td>${i.metodo || 'GET'}</td><td><span class="badge ${i.estado === 'Correcta' ? 'badge-success' : i.estado === 'Error' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
     }
 
     function renderTrazabilidad() {
@@ -1168,17 +1168,17 @@
     }
 
     // Función para borrar los logs de trazabilidad
-    window.clearLogs = function() {
+    window.clearLogs = function () {
         if (confirm('⚠️ ¿Estás seguro de que quieres borrar todos los logs de trazabilidad? Esta acción no se puede deshacer.')) {
             // Limpiamos el array de trazabilidad
             appData.trazabilidad = [];
-            
+
             // Guardamos los cambios en localStorage
             saveData();
-            
+
             // Recargamos la página para que la tabla se vea vacía
             renderPage('trazabilidad');
-            
+
             toast('Logs eliminados correctamente', 'success');
             addNotification('🗑️ Historial borrado', 'Se han eliminado todos los registros de trazabilidad');
         }
@@ -1406,7 +1406,7 @@
         const casos = filterByProject(appData.casos);
         const bugs = filterByProject(appData.bugs);
         const ejecuciones = filterByProject(appData.ejecuciones);
-        
+
         // --- NUEVO: Extraemos los datos de las APIs ---
         const apis = filterByProject(appData.apis);
 
@@ -1415,7 +1415,7 @@
         const cobertura = casos.length > 0 ? Math.round((casosPasados / casos.length) * 100) : 0;
         const bugsAbiertos = bugs.filter(b => b.estado !== 'Solucionado').length;
         const bugsSolucionados = bugs.filter(b => b.estado === 'Solucionado').length;
-        
+
         // --- NUEVO: Calculamos métricas de APIs ---
         const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
 
@@ -1529,16 +1529,16 @@
         <table>
             <tr><th>ID</th><th>Ciclo</th><th>Fecha</th><th>Responsable</th><th>Casos</th></tr>
             ${ejecuciones.map(e => {
-                    let casosCount = 0;
-                    try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
-                    return `<tr>
+            let casosCount = 0;
+            try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
+            return `<tr>
                 <td>${e.id}</td>
                 <td>${e.nombreCiclo || ''}</td>
                 <td>${e.fecha || '-'}</td>
                 <td>${e.responsable || '-'}</td>
                 <td>${casosCount}</td>
             </tr>`;
-                }).join('')}
+        }).join('')}
         </table>
 
         <h1 class="section">6. Gestión de APIs</h1>
@@ -1557,9 +1557,9 @@
         <h1 class="section">7. Conclusiones y Recomendaciones</h1>
         <div class="conclusion">
             <p><strong>Estado general de calidad:</strong> ${cobertura >= 80 && bugsAbiertos === 0 ? '✅ <strong>Óptimo</strong> - El producto cumple con los estándares de calidad establecidos.' :
-                        cobertura >= 50 ? '⚠️ <strong>Mejorable</strong> - Se recomienda incrementar la cobertura de pruebas y resolver los defectos pendientes.' :
-                            '🚨 <strong>Crítico</strong> - Se requiere atención inmediata. La cobertura de pruebas es insuficiente y hay defectos abiertos.'
-                    }</p>
+                cobertura >= 50 ? '⚠️ <strong>Mejorable</strong> - Se recomienda incrementar la cobertura de pruebas y resolver los defectos pendientes.' :
+                    '🚨 <strong>Crítico</strong> - Se requiere atención inmediata. La cobertura de pruebas es insuficiente y hay defectos abiertos.'
+            }</p>
             <p style="margin-top:12px;"><strong>Recomendaciones:</strong></p>
             <ul style="margin-left:20px;">
             ${bugsAbiertos > 0 ? '<li>Priorizar la resolución de los ' + bugsAbiertos + ' defectos abiertos.</li>' : ''}
@@ -1581,11 +1581,11 @@
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `Informe_QA_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
-        
+
         a.click();
-        
+
         URL.revokeObjectURL(a.href);
-        
+
         toast('📄 Informe profesional descargado', 'success');
         addNotification(' Informe generado', 'Se ha descargado un nuevo informe de calidad');
     }
@@ -1644,19 +1644,19 @@
         }
     });
 
-    window.previsualizarCapturaQA = function(event, containerId) {
+    window.previsualizarCapturaQA = function (event, containerId) {
         const file = event.target.files[0];
         const container = document.getElementById(containerId);
         const hiddenInput = document.getElementById('f_archivos_base64'); // Input oculto para guardar la data
-    
+
         if (file && file.type.startsWith('image/')) {
             const reader = new FileReader();
-            reader.onload = function(e) {
+            reader.onload = function (e) {
                 const base64Data = e.target.result;
                 // Mostramos la miniatura en el modal
                 container.innerHTML = `<img src="${base64Data}" style="max-width: 100%; max-height: 180px; border-radius: 8px; border: 1px solid var(--border); margin-top: 10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">`;
                 // Guardamos la cadena base64 en el input oculto
-                if(hiddenInput) hiddenInput.value = base64Data;
+                if (hiddenInput) hiddenInput.value = base64Data;
             };
             reader.readAsDataURL(file);
         }
