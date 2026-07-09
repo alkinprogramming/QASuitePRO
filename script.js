@@ -142,9 +142,21 @@
 
     function filterByProject(arr, key = 'proyecto') {
         const ap = getActiveProject();
-        // Si arr es undefined o null, retornar array vacío
         if (!arr || !Array.isArray(arr)) return [];
-        return ap ? arr.filter(i => (i[key] || i.proyecto) === ap) : arr;
+
+        let result = arr;
+
+        // Filtrar por proyecto activo
+        if (ap) {
+            result = result.filter(i => (i[key] || i.proyecto) === ap);
+        }
+
+        // Si es consultor, SOLO ve sus propios registros
+        if (currentUser && currentUser.rol === 'Consultor') {
+            result = result.filter(i => i.creadoPor === currentUser.id);
+        }
+
+        return result;
     }
 
     function saveSession(uid) { sessionStorage.setItem(SESSION_KEY, uid); }
@@ -165,6 +177,13 @@
         document.getElementById('appScreen').style.display = 'flex';
         document.getElementById('userDisplay').textContent = currentUser.nombre.split(' ')[0];
         document.getElementById('userAvatar').textContent = currentUser.nombre.split(' ')[0].charAt(0).toUpperCase();
+        
+        // Ocultar Ajustes si no es admin
+        const menuAjustes = document.getElementById('menuAjustes');
+        if (menuAjustes && currentUser.rol !== 'Admin') {
+            menuAjustes.style.display = 'none';
+        }
+        
         buildSidebar();
         initApp();
         updateNotificationBadge();
@@ -203,6 +222,13 @@
                     { page: 'historico', icon: '📦', label: 'Histórico', iconClass: 'icon-historico' },
                     { page: 'ajustes', icon: '⚙️', label: 'Ajustes', iconClass: 'icon-ajustes' }
                 ], adminOnly: true
+            },
+            {
+                section: 'Gestión', 
+                items: [
+                    { page: 'permisos', icon: '🔐', label: 'Permisos Consultores', iconClass: 'icon-ajustes' }
+                ], 
+                adminOnly: true
             }
         ];
         let html = `<div class="sidebar-logo">
@@ -464,15 +490,20 @@
     function populateProjectSelector() {
         const sel = document.getElementById('activeProjectSelect');
         if (!sel) return;
+        
+        let projectsToShow = appData.proyectos || [];
+        
+        // Si es consultor, mostrar solo sus proyectos autorizados
+        if (currentUser && currentUser.rol === 'Consultor' && currentUser.proyectosAutorizados && currentUser.proyectosAutorizados.length > 0) {
+            projectsToShow = projectsToShow.filter(p => currentUser.proyectosAutorizados.includes(p.id));
+        }
+        
         sel.innerHTML = '<option value="">Todos los proyectos</option>';
-
-        // Validación de seguridad - AGREGA ESTO
-        if (!appData.proyectos || !Array.isArray(appData.proyectos)) {
-            console.warn('proyectos no está definido o no es un array');
+        if (!Array.isArray(projectsToShow) || projectsToShow.length === 0) {
+            sel.innerHTML = '<option value="">Sin proyectos disponibles</option>';
             return;
         }
-
-        appData.proyectos.forEach(p =>
+        projectsToShow.forEach(p =>
             sel.innerHTML += `<option value="${p.id}" ${p.id === getActiveProject() ? 'selected' : ''}>${p.nombre || p.id}</option>`
         );
     }
@@ -481,10 +512,18 @@
             toast('No tienes permiso para acceder a esta sección', 'error');
             return;
         }
-        if (projectRequiredPages.includes(page) && !getActiveProject()) {
-            toast('Selecciona un proyecto activo primero', 'warning');
-            page = 'dashboard';
+
+        // Verificar si el consultor tiene proyectos autorizados
+        if (currentUser.rol === 'Consultor' && projectRequiredPages.includes(page)) {
+            if (!currentUser.proyectosAutorizados || currentUser.proyectosAutorizados.length === 0) {
+                toast('No tienes proyectos asignados. Contacta al administrador.', 'error');
+                page = 'dashboard';
+            } else if (!getActiveProject()) {
+                // Forzar selección de proyecto si es consultor
+                toast('Selecciona un proyecto para comenzar', 'warning');
+            }
         }
+
         currentPage = page;
         saveLastPage(page);
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -511,6 +550,7 @@
             case 'informes': html = renderInformes(); break;
             case 'historico': html = renderHistorico(); break;
             case 'ajustes': html = renderAjustes(); break;
+            case 'permisos': html = renderConsultantPermissions(); break;
         }
         content.innerHTML = html;
         bindPageEvents(page);
@@ -547,6 +587,39 @@
             })
         );
     }
+
+    function renderConsultantPermissions() {
+        const consultants = appData.usuarios.filter(u => u.rol === 'Consultor');
+        let html = '<h1 class="page-title">🔐 Permisos de Consultores</h1>';
+        if (consultants.length === 0) {
+            html += '<div class="empty-state"><div class="empty-state-icon"></div><div>No hay consultores registrados</div></div>';
+            return html;
+        }
+        html += '<div class="chart-grid">';
+        consultants.forEach(consultant => {
+            const projects = consultant.proyectosAutorizados || [];
+            const projectNames = projects.map(pid => {
+                const p = appData.proyectos.find(proj => proj.id === pid);
+                return p ? (p.nombre || p.id) : pid;
+            }).join(', ') || 'Ninguno';
+            html += `
+                <div class="chart-card">
+                    <div class="chart-title">👤 ${consultant.nombre}</div>
+                    <div style="margin-bottom:12px;"><strong>Usuario:</strong> ${consultant.usuario}</div>
+                    <div style="margin-bottom:12px;"><strong>Proyectos autorizados:</strong> ${projects.length}</div>
+                    <div style="padding:12px; background:var(--card-alt); border-radius:8px; font-size:0.9rem; min-height:40px;">
+                        ${projectNames}
+                    </div>
+                    <button class="btn btn-outline btn-sm" style="margin-top:12px;" onclick="window.openModal('usuarios', ${consultant.id})">
+                        ✏️ Editar Permisos
+                    </button>
+                </div>
+            `;
+        });
+        html += '</div>';
+        return html;
+    }
+
     function handleAction(page, action, id) {
         if (action === 'create') openModal(page);
         else if (action === 'edit') openModal(page, id);
@@ -629,7 +702,8 @@
         });
         document.addEventListener('keydown', escCloseModal);
     }
-    function openModal(page, id, viewOnly = false) {
+
+    window.openModal = function (page, id, viewOnly = false) {
         const container = document.getElementById('modalContainer');
         let html = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal">
         <h3>${viewOnly ? '👁️ Detalle' : (id ? '✏️ Editar' : ' Nuevo')}</h3>`;
@@ -654,7 +728,8 @@
             }
         }
         document.addEventListener('keydown', escCloseModal);
-    }
+    };
+
     window.closeModal = () => {
         document.getElementById('modalContainer').innerHTML = '';
         document.removeEventListener('keydown', escCloseModal);
@@ -676,7 +751,14 @@
             }
             return opts;
         };
-        // --- NUEVO: Generador de opciones para seleccionar Casos y Bugs en Capturas ---
+
+        window.toggleProjectPermissions = function() {
+            const roleSelect = document.getElementById('f_rol');
+            const permDiv = document.getElementById('project-permissions');
+            if (permDiv && roleSelect) {
+                permDiv.style.display = roleSelect.value === 'Consultor' ? 'block' : 'none';
+            }
+        };
         const getCasosBugsOpts = (selectedValue) => {
             let opts = '<option value="">Ninguno / Seleccionar...</option>';
             if (appData.casos && appData.casos.length > 0) {
@@ -738,14 +820,28 @@
                     <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
                     <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Pendiente de Revisión</option><option>Aprobado</option><option>Descartado</option></select></div>`;
                 break;
-            case 'usuarios':
+                case 'usuarios':
+                const isConsultor = item?.rol === 'Consultor';
+                const proyectosAutorizados = item?.proyectosAutorizados || [];
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || Date.now()}" ${d} id="f_id" type="number"></div>
                     <div class="form-group"><label>Nombre completo *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
                     <div class="form-group"><label>Usuario *</label><input value="${item?.usuario || ''}" ${d} id="f_usuario"></div>
                     <div class="form-group"><label>Contraseña *</label><input type="password" value="${item?.password || ''}" ${d} id="f_password"></div>
-                    <div class="form-group"><label>Rol</label><select ${d} id="f_rol"><option>Admin</option><option>Consultor</option></select></div>`;
-                break;
-            case 'casos':
+                    <div class="form-group"><label>Rol</label><select ${d} id="f_rol" onchange="toggleProjectPermissions()"><option ${item?.rol === 'Admin' ? 'selected' : ''}>Admin</option><option ${item?.rol === 'Consultor' ? 'selected' : ''}>Consultor</option></select></div>
+                    <div class="form-group" id="project-permissions" style="${isConsultor ? '' : 'display:none;'}">
+                        <label>📁 Proyectos Autorizados</label>
+                        <div class="checkbox-list" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">
+                            ${appData.proyectos.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay proyectos creados</div>' : 
+                            appData.proyectos.map(p => `
+                                <label class="checkbox-item" style="display:flex; align-items:center; gap:8px; padding:6px 0;">
+                                    <input type="checkbox" class="project-perm-cb" value="${p.id}" ${proyectosAutorizados.includes(p.id) ? 'checked' : ''}>
+                                    <span>${p.nombre || p.id}</span>
+                                </label>
+                            `).join('')}
+                        </div>
+                        <small style="color:var(--text2); display:block; margin-top:8px;">Selecciona los proyectos que este consultor podrá ver y gestionar</small>
+                    </div>`;
+                break;            case 'casos':
                 h += `<div class="form-group"><label>ID Caso</label><input value="${item?.id || 'CASO-' + Date.now()}" ${d} id="f_id"></div>
                     <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
                     <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad"><option>Crítica</option><option>Alta</option><option>Media</option><option>Baja</option></select></div>
@@ -789,7 +885,7 @@
                     <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>
                     <div class="form-group"><label>Casos Asociados</label>
                         <div class="checkbox-list">
-       ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
+                    ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
                         casosDisponibles.map(c => `
                                 <label class="checkbox-item">
                                 <input type="checkbox" class="caso-check" value="${c.id}" ${casosAsociados.includes(c.id) ? 'checked' : ''}>
@@ -862,21 +958,25 @@
     window.saveModal = function (page, id) {
         const arr = getArrayForPage(page);
         const data = {};
-        // 1. Atrapa dinámicamente TODOS los campos del modal que empiecen por "f_"
+        // 1. Atrapa dinámicamente TODOS los campos del modal que empiecen por "f_" 
         const formElements = document.querySelectorAll('.modal [id^="f_"]');
         formElements.forEach(el => {
             const fieldName = el.id.replace('f_', '');
             data[fieldName] = el.value;
         });
+
         if (!data.id) return (typeof showToast === 'function' ? showToast('ID requerido', 'error') : toast('ID requerido', 'error'));
-        // 2. REQUERIMIENTO CLAVE: Vincular al proyecto activo
+
+        // 2. REQUERIMIENTO CLAVE: Vincular al proyecto activo 
         const modulosConProyecto = ['casos', 'bugs', 'ejecuciones', 'capturas', 'diario', 'apis', 'objetivos', 'mejoras'];
         if (modulosConProyecto.includes(page)) {
-            data.proyecto = getActiveProject(); // <-- Aquí forzamos que se guarde en el proyecto actual
+            data.proyecto = getActiveProject(); // <-- Aquí forzamos que se guarde en el proyecto actual 
         }
-        // 3. Lógica Especial (Ejecuciones Xray y Capturas Base64)
+
+        // 3. Lógica Especial (Ejecuciones Xray y Capturas Base64) 
         if (page === 'ejecuciones') {
-            const checked = Array.from(document.querySelectorAll('.exec-case-cb:checked')).map(cb => cb.value);
+            // CORREGIDO: Usar '.caso-check' en lugar de '.exec-case-cb'
+            const checked = Array.from(document.querySelectorAll('.caso-check:checked')).map(cb => cb.value);
             let oldCases = [];
             if (id) {
                 const existingItem = arr.find(x => x.id == id);
@@ -888,13 +988,31 @@
             });
             data.casosAsociados = JSON.stringify(newCasesData);
         }
+
         if (page === 'capturas') {
             const base64Input = document.getElementById('f_archivos_base64');
             if (base64Input && base64Input.value) {
                 data.archivos = base64Input.value;
             }
         }
-        // 4. Guardar o Actualizar Array
+
+        if (page === 'usuarios') {
+            const roleSelect = document.getElementById('f_rol');
+            if (roleSelect && roleSelect.value === 'Consultor') {
+                const authorizedProjects = Array.from(document.querySelectorAll('.project-perm-cb:checked')).map(cb => cb.value);
+                data.proyectosAutorizados = authorizedProjects;
+            } else {
+                data.proyectosAutorizados = [];
+            }
+        }
+
+        // Marcar quién crea el registro (aislamiento de consultores)
+        if (!id) {
+            // Solo en creación nueva, no al editar
+            data.creadoPor = currentUser.id;
+        }
+
+        // 4. Guardar o Actualizar Array 
         if (id) {
             const idx = arr.findIndex(x => x.id == id);
             if (idx >= 0) arr[idx] = { ...arr[idx], ...data };
@@ -902,6 +1020,7 @@
             arr.push(data);
             if (page === 'proyectos') populateProjectSelector();
         }
+
         saveData();
         closeModal();
         renderPage(currentPage);
@@ -1018,12 +1137,24 @@
         htmlPaginador += '</div>';
         return htmlPaginador;
     }
-    // ============ DASHBOARD ============
+
+    function getVisibleData(arr, key = 'proyecto') {
+        const ap = getActiveProject();
+        if (!arr || !Array.isArray(arr)) return [];
+        let result = arr;
+        if (ap) result = result.filter(i => (i[key] || i.proyecto) === ap);
+        // Admin ve TODO, consultor solo lo suyo
+        if (currentUser && currentUser.rol === 'Consultor') {
+            result = result.filter(i => i.creadoPor === currentUser.id);
+        }
+        return result;
+    }
+// ============ DASHBOARD ============
     function renderDashboard() {
-        const bugs = filterByProject(appData.bugs || []);
-        const casos = filterByProject(appData.casos || []);
-        const ejecuciones = filterByProject(appData.ejecuciones || []);
-        const apis = filterByProject(appData.apis || []);
+        const casos = getVisibleData(appData.casos);
+        const bugs = getVisibleData(appData.bugs);
+        const ejecuciones = getVisibleData(appData.ejecuciones);
+        const apis = getVisibleData(appData.apis);
         const proysActivos = (appData.proyectos || []).filter(p => p.estado === 'Activo').length;
         const casosPasados = casos.filter(c => c.estado === 'Pasado').length;
         const casosFallidos = casos.filter(c => c.estado === 'Fallido').length;
@@ -1337,24 +1468,24 @@ ${renderDonutChart('Severidad Bugs', [
                         'Blocked': 'status-blocked',
                         'Pendiente': 'status-pending'
                     }[c.status] || 'status-pending';
-                    html += `<div class="xray-matrix-row">
-                    <div>
-                        <div class="xray-case-id">${c.id}</div>
-                        <div class="xray-case-title">${title}</div>
-                    </div>
-                    <div class="xray-priority">
-                        <span class="badge ${prioridad === 'Crítica' ? 'badge-danger' : prioridad === 'Alta' ? 'badge-warning' : 'badge-info'}">${prioridad}</span>
-                    </div>
-                    <div style="color:var(--text2); font-size:0.85rem;">${actor}</div>
-                    <div>
-                        <select class="status-select ${statusClass}" data-tpid="${tp.id}" data-cid="${c.id}" onchange="updateXrayStatus(this)">
-                        <option value="Pendiente" ${c.status === 'Pendiente' || !c.status ? 'selected' : ''}>⏳ Pendiente</option>
-                        <option value="In Progress" ${c.status === 'In Progress' ? 'selected' : ''}>🔄 In Progress</option>
-                        <option value="Passed" ${c.status === 'Passed' ? 'selected' : ''}>✅ Passed</option>
-                        <option value="Failed" ${c.status === 'Failed' ? 'selected' : ''}>❌ Failed</option>
-                        <option value="Blocked" ${c.status === 'Blocked' ? 'selected' : ''}>🚫 Blocked</option>
-                        </select>
-                    </div>
+                    html += `<div class="xray-matrix-row" onclick="showCaseDetail('${c.id}', '${tp.id}')" style="cursor:pointer;">
+                        <div>
+                            <div class="xray-case-id">${c.id}</div>
+                            <div class="xray-case-title">${title}</div>
+                        </div>
+                        <div class="xray-priority">
+                            <span class="badge ${prioridad === 'Crítica' ? 'badge-danger' : prioridad === 'Alta' ? 'badge-warning' : 'badge-info'}">${prioridad}</span>
+                        </div>
+                        <div style="color:var(--text2); font-size:0.85rem;">${actor}</div>
+                        <div onclick="event.stopPropagation();">
+                            <select class="status-select ${statusClass}" data-tpid="${tp.id}" data-cid="${c.id}" onchange="updateXrayStatus(this)">
+                                <option value="Pendiente" ${c.status === 'Pendiente' || !c.status ? 'selected' : ''}>⏳ Pendiente</option>
+                                <option value="In Progress" ${c.status === 'In Progress' ? 'selected' : ''}>🔄 In Progress</option>
+                                <option value="Passed" ${c.status === 'Passed' ? 'selected' : ''}>✅ Passed</option>
+                                <option value="Failed" ${c.status === 'Failed' ? 'selected' : ''}>❌ Failed</option>
+                                <option value="Blocked" ${c.status === 'Blocked' ? 'selected' : ''}>🚫 Blocked</option>
+                            </select>
+                        </div>
                     </div>`;
                 });
             }
@@ -1363,11 +1494,121 @@ ${renderDonutChart('Severidad Bugs', [
         html += '</div>';
         return html;
     }
+
+    window.showCaseDetail = function (caseId, execId) {
+        const caseRef = appData.casos.find(c => c.id === caseId);
+        const execRef = appData.ejecuciones.find(e => e.id === execId);
+
+        if (!caseRef) {
+            toast('Caso de uso no encontrado', 'error');
+            return;
+        }
+
+        const container = document.getElementById('modalContainer');
+        const html = `
+            <div class="modal-overlay" onclick="if(event.target===this)closeCaseDetail()">
+            <div class="modal" style="max-width:900px;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h3 style="margin:0;">📋 ${caseRef.id} - ${caseRef.titulo}</h3>
+                    <button class="btn btn-sm btn-outline" onclick="closeCaseDetail()">✕ Cerrar</button>
+                </div>
+                
+                <div style="background:var(--card-alt); padding:15px; border-radius:8px; margin-bottom:20px;">
+                    <label style="font-size:0.85rem; color:var(--text2); display:block; margin-bottom:8px;">📝 DESCRIPCIÓN DEL REQUISITO</label>
+                    <div style="font-size:0.95rem; line-height:1.6; color:var(--text);">
+                        ${caseRef.descripcion || '<span style="color:var(--text2);">Sin descripción</span>'}
+                    </div>
+                </div>
+                
+                <div style="display:flex; gap:10px; margin-bottom:20px;">
+                    <button class="btn btn-accent" onclick="showCaseTab('flujo')" id="tab-flujo" style="flex:1;">
+                        🔄 Flujo de Pasos
+                    </button>
+                    <button class="btn btn-outline" onclick="showCaseTab('bdd')" id="tab-bdd" style="flex:1;">
+                        🎯 Criterios BDD
+                    </button>
+                </div>
+                
+                <div id="content-flujo" style="display:block;">
+                    <div class="form-group">
+                        <label>📋 FLUJO DE PASOS</label>
+                        <div style="background:var(--card-alt); padding:15px; border-radius:8px; white-space:pre-wrap; line-height:1.6;">
+                            ${caseRef.flujo || '<span style="color:var(--text2);">Sin flujo definido</span>'}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>️ INPUT DEL CLIENTE</label>
+                        <div style="background:var(--card-alt); padding:15px; border-radius:8px; white-space:pre-wrap; line-height:1.6;">
+                            ${caseRef.inputCliente || '<span style="color:var(--text2);">Sin input definido</span>'}
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>✅ RESULTADO ESPERADO</label>
+                        <div style="background:var(--card-alt); padding:15px; border-radius:8px; white-space:pre-wrap; line-height:1.6;">
+                            ${caseRef.resultadoEsperado || '<span style="color:var(--text2);">Sin resultado definido</span>'}
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="content-bdd" style="display:none;">
+                    <div class="form-group">
+                        <label>🎯 CRITERIOS DE ACEPTACIÓN (BDD)</label>
+                        <div style="background:var(--card-alt); padding:15px; border-radius:8px; white-space:pre-wrap; line-height:1.6; font-family:monospace; font-size:0.9rem;">
+                            ${caseRef.criterios || '<span style="color:var(--text2);">Sin criterios BDD definidos</span>'}
+                        </div>
+                    </div>
+                </div>
+                
+                ${caseRef.comentarios ? `
+                <div class="form-group" style="margin-top:20px;">
+                    <label>💬 COMENTARIOS / RESULTADO OBTENIDO</label>
+                    <div style="background:var(--card-alt); padding:15px; border-radius:8px; white-space:pre-wrap; line-height:1.6;">
+                        ${caseRef.comentarios}
+                    </div>
+                </div>` : ''}
+                
+                <div style="margin-top:20px; padding-top:20px; border-top:1px solid var(--border); display:flex; gap:10px;">
+                    <button class="btn btn-outline" onclick="closeCaseDetail()">Cerrar</button>
+                </div>
+            </div>
+            </div>
+        `;
+
+        container.innerHTML = html;
+        document.addEventListener('keydown', escCloseModal);
+    };
+
+    window.closeCaseDetail = function () {
+        document.getElementById('modalContainer').innerHTML = '';
+        document.removeEventListener('keydown', escCloseModal);
+    };
+
+    window.showCaseTab = function (tab) {
+        const flujoContent = document.getElementById('content-flujo');
+        const bddContent = document.getElementById('content-bdd');
+        const flujoBtn = document.getElementById('tab-flujo');
+        const bddBtn = document.getElementById('tab-bdd');
+
+        if (tab === 'flujo') {
+            flujoContent.style.display = 'block';
+            bddContent.style.display = 'none';
+            flujoBtn.className = 'btn btn-accent';
+            bddBtn.className = 'btn btn-outline';
+        } else {
+            flujoContent.style.display = 'none';
+            bddContent.style.display = 'block';
+            flujoBtn.className = 'btn btn-outline';
+            bddBtn.className = 'btn btn-accent';
+        }
+    };
+
+
     window.updateXrayStatus = function (selectEl) {
         const tpId = selectEl.dataset.tpid;
         const cId = selectEl.dataset.cid;
         const newStatus = selectEl.value;
         const tp = appData.ejecuciones.find(e => e.id === tpId);
+
         if (tp) {
             try {
                 let casos = JSON.parse(tp.casosAsociados);
@@ -1375,17 +1616,160 @@ ${renderDonutChart('Severidad Bugs', [
                 if (caso) {
                     caso.status = newStatus;
                     tp.casosAsociados = JSON.stringify(casos);
+
                     selectEl.className = 'status-select status-' + {
                         'Passed': 'passed', 'Failed': 'failed', 'In Progress': 'progress',
                         'Blocked': 'blocked', 'Pendiente': 'pending'
                     }[newStatus];
+
                     saveData();
                     toast(`Estado actualizado: ${newStatus}`, 'success');
+
+                    // Si el estado es Failed o Blocked, abrir modal para crear bug
+                    if (newStatus === 'Failed' || newStatus === 'Blocked') {
+                        setTimeout(() => openBugFromExecution(cId, tpId, newStatus), 300);
+                    }
+
                     setTimeout(() => renderPage(currentPage), 500);
                 }
             } catch (e) { }
         }
     };
+
+    window.openBugFromExecution = function (caseId, execId, status) {
+        const caseRef = appData.casos.find(c => c.id === caseId);
+        const execRef = appData.ejecuciones.find(e => e.id === execId);
+
+        if (!caseRef) {
+            toast('Caso de uso no encontrado', 'error');
+            return;
+        }
+
+        const container = document.getElementById('modalContainer');
+        const bugId = 'BUG-' + Date.now();
+
+        const html = `
+        <div class="modal-overlay" onclick="if(event.target===this)closeBugModal()">
+        <div class="modal" style="max-width:700px;">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                <h3 style="margin:0;">🐛 Crear Bug desde Ejecución</h3>
+                <button class="btn btn-sm btn-outline" onclick="closeBugModal()">✕ Cerrar</button>
+            </div>
+            
+            <div style="background:var(--card-alt); padding:15px; border-radius:8px; margin-bottom:20px; border-left:4px solid var(--danger);">
+                <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px;">ℹ️ Bug generado automáticamente desde:</div>
+                <div style="font-size:0.9rem;">
+                    <strong>Ejecución:</strong> ${execRef?.id || execId} - ${execRef?.nombreCiclo || ''}<br>
+                    <strong>Caso:</strong> ${caseRef.id} - ${caseRef.titulo}<br>
+                    <strong>Estado:</strong> <span style="color:var(--danger); font-weight:600;">${status}</span>
+                </div>
+            </div>
+            
+            <div class="form-group">
+                <label>ID Bug</label>
+                <input value="${bugId}" id="f_bug_id" readonly style="background:var(--bg2);">
+            </div>
+            
+            <div class="form-group">
+                <label>Título *</label>
+                <input value="Fallo en ${caseRef.id}: ${caseRef.titulo}" id="f_bug_titulo">
+            </div>
+            
+            <div class="form-group">
+                <label>Caso Relacionado</label>
+                <input value="${caseRef.id}" id="f_bug_casoRelacionado" readonly style="background:var(--bg2);">
+            </div>
+            
+            <div class="form-group">
+                <label>Severidad</label>
+                <select id="f_bug_severidad">
+                    <option>Bloqueante</option>
+                    <option selected>Crítica</option>
+                    <option>Mayor</option>
+                    <option>Menor</option>
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Resumen Técnico</label>
+                <textarea id="f_bug_resumen" placeholder="Describe brevemente el fallo...">El caso de prueba ${caseRef.id} ha fallado durante la ejecución ${execRef?.id || ''}. Estado: ${status}</textarea>
+            </div>
+            
+            <div class="form-group">
+                <label>Descripción Detallada</label>
+                <textarea id="f_bug_descripcion" rows="5" placeholder="Pasos para reproducir, entorno, etc.">Caso de uso: ${caseRef.id} - ${caseRef.titulo}
+
+Ejecución: ${execRef?.id || ''} - ${execRef?.nombreCiclo || ''}
+
+Resultado esperado:
+${caseRef.resultadoEsperado || 'No definido'}
+
+Estado obtenido: ${status}</textarea>
+            </div>
+            
+            <div class="form-group">
+                <label>Estado</label>
+                <select id="f_bug_estado">
+                    <option selected>Abierto</option>
+                    <option>En revisión</option>
+                </select>
+            </div>
+            
+            <div class="modal-actions" style="margin-top:20px;">
+                <button class="btn btn-accent" onclick="saveBugFromExecution('${bugId}', '${caseRef.id}', '${execId}', '${status}')">💾 Guardar Bug</button>
+                <button class="btn btn-outline" onclick="closeBugModal()">Cancelar</button>
+            </div>
+        </div>
+        </div>
+    `;
+
+        container.innerHTML = html;
+        document.addEventListener('keydown', escCloseModal);
+    };
+
+    // Función para guardar el bug creado desde ejecución
+    window.saveBugFromExecution = function (bugId, caseId, execId, status) {
+        const titulo = document.getElementById('f_bug_titulo').value.trim();
+        const casoRelacionado = document.getElementById('f_bug_casoRelacionado').value;
+        const severidad = document.getElementById('f_bug_severidad').value;
+        const resumen = document.getElementById('f_bug_resumen').value;
+        const descripcion = document.getElementById('f_bug_descripcion').value;
+        const estado = document.getElementById('f_bug_estado').value;
+
+        if (!titulo) {
+            toast('El título es obligatorio', 'error');
+            return;
+        }
+
+        const bug = {
+            id: bugId,
+            proyecto: getActiveProject(),
+            casoRelacionado: casoRelacionado,
+            titulo: titulo,
+            resumen: resumen,
+            descripcion: descripcion,
+            severidad: severidad,
+            estado: estado,
+            comentarios: `Bug generado automáticamente desde ejecución ${execId} con estado ${status}`,
+            fechaCreacion: new Date().toISOString()
+        };
+
+        appData.bugs.push(bug);
+        addTrace('bugs', 'Creación automática', bugId);
+        saveData();
+        closeBugModal();
+        renderPage(currentPage);
+        toast('Bug creado correctamente', 'success');
+        addNotification(' Bug creado', `Bug ${bugId} generado desde ejecución fallida`);
+    };
+
+    // Función para cerrar el modal de bug
+    window.closeBugModal = function () {
+        document.getElementById('modalContainer').innerHTML = '';
+        document.removeEventListener('keydown', escCloseModal);
+    };
+
+
     function renderInformes() {
         return `<h1 class="page-title">📄 Informes de Seguimiento</h1>
         <p class="page-subtitle">Genera informes profesionales en formato Word con métricas y gráficos</p>
@@ -1729,6 +2113,32 @@ ${renderDonutChart('Severidad Bugs', [
 
         const loginPassInput = document.getElementById('loginPass');
         if (loginPassInput) loginPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+
+        if (appData.usuarios && appData.usuarios.length > 0) {
+            let changed = false;
+            appData.usuarios.forEach(u => {
+                if (!u.proyectosAutorizados) {
+                    u.proyectosAutorizados = u.rol === 'Admin' ? [] : [];
+                    changed = true;
+                }
+            });
+            if (changed) saveData();
+        }
+
+        const dataArrays = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'registroDiario'];
+        let needsSave = false;
+        dataArrays.forEach(key => {
+            if (appData[key] && Array.isArray(appData[key])) {
+                appData[key].forEach(item => {
+                    if (!item.creadoPor) {
+                        item.creadoPor = 1; // Asignar al Admin (id: 1)
+                        needsSave = true;
+                    }
+                });
+            }
+        });
+        if (needsSave) saveData();
+
     }
 
 
