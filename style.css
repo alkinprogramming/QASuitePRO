@@ -1946,3 +1946,32 @@ tr:hover td {
 .cp-apis { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; }
 .cp-proyectos { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
 .cp-objetivos { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
+
+/* ============ INFORMES ============ */
+.chart-card button {
+    width: 100%;
+    justify-content: center;
+    margin-top: 10px;
+}
+
+#comparativaResult table {
+    background: var(--bg);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#comparativaResult th {
+    background: var(--card-alt);
+    color: var(--text);
+    font-weight: 600;
+}
+
+#comparativaResult td {
+    border-bottom: 1px solid var(--border);
+}
+
+@media (max-width: 768px) {
+    .chart-card[style*="grid-column: span 2"] {
+        grid-column: span 1;
+    }
+}
