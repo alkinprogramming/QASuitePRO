@@ -974,6 +974,7 @@ tr:hover td {
     justify-content: center;
     animation: fadeIn 0.2s ease;
     padding: 20px;
+    cursor: default;
 }
 
 @keyframes fadeIn {
@@ -989,10 +990,10 @@ tr:hover td {
 .modal {
     background: var(--card);
     border-radius: 20px;
-    padding: 28px;
+    padding: 32px;
     width: 100%;
-    max-width: 680px;
-    max-height: 85vh;
+    max-width: 850px;
+    max-height: 90vh;
     overflow-y: auto;
     box-shadow: 0 30px 60px rgba(0, 0, 0, 0.8);
     border: 1px solid var(--border);
@@ -1065,7 +1066,7 @@ tr:hover td {
 }
 
 .confirm-modal {
-    max-width: 420px;
+    max-width: 480px;
     text-align: center;
 }
 
@@ -1742,3 +1743,206 @@ tr:hover td {
     margin: 0;
     cursor: pointer;
 }
+
+/* ============ COMMAND PALETTE ============ */
+.command-palette-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(4px);
+    z-index: 3000;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 120px;
+    animation: fadeIn 0.2s ease;
+}
+
+.command-palette {
+    background: var(--card);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 700px;
+    max-height: 600px;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6);
+    border: 1px solid var(--border);
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: modalSlide 0.25s ease;
+}
+
+.command-palette-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--card-alt);
+}
+
+.command-palette-icon {
+    font-size: 1.5rem;
+    color: var(--accent);
+}
+
+.command-palette-input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    font-size: 1.1rem;
+    color: var(--text);
+    font-family: var(--font);
+}
+
+.command-palette-input::placeholder {
+    color: var(--text2);
+}
+
+.command-palette-shortcut {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text2);
+    font-family: var(--font);
+}
+
+.command-palette-results {
+    flex: 1;
+    overflow-y: auto;
+    max-height: 420px;
+    padding: 12px 0;
+}
+
+.command-palette-hint {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--text2);
+    font-size: 0.9rem;
+}
+
+.command-palette-category {
+    margin-bottom: 8px;
+}
+
+.command-palette-category-title {
+    padding: 8px 24px 4px;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text2);
+    font-weight: 700;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.command-palette-item {
+    padding: 12px 24px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    transition: 0.15s;
+    border-left: 3px solid transparent;
+}
+
+.command-palette-item:hover,
+.command-palette-item.selected {
+    background: rgba(59, 130, 246, 0.1);
+    border-left-color: var(--accent);
+}
+
+.command-palette-item.selected {
+    background: rgba(59, 130, 246, 0.15);
+}
+
+.command-palette-item-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.command-palette-item-content {
+    flex: 1;
+    min-width: 0;
+}
+
+.command-palette-item-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    color: var(--text);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.command-palette-item-subtitle {
+    font-size: 0.75rem;
+    color: var(--text2);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.command-palette-item-badge {
+    font-size: 0.7rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.command-palette-footer {
+    display: flex;
+    gap: 20px;
+    padding: 12px 24px;
+    border-top: 1px solid var(--border);
+    background: var(--card-alt);
+    font-size: 0.75rem;
+    color: var(--text2);
+}
+
+.command-palette-footer-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.command-palette-footer kbd {
+    background: var(--input-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.command-palette-empty {
+    padding: 40px 24px;
+    text-align: center;
+    color: var(--text2);
+}
+
+.command-palette-empty-icon {
+    font-size: 2.5rem;
+    margin-bottom: 12px;
+    opacity: 0.5;
+}
+
+/* Colores específicos por módulo */
+.cp-casos { background: rgba(59, 130, 246, 0.15); color: #60a5fa; }
+.cp-bugs { background: rgba(239, 68, 68, 0.15); color: #f87171; }
+.cp-ejecuciones { background: rgba(16, 185, 129, 0.15); color: #34d399; }
+.cp-apis { background: rgba(20, 184, 166, 0.15); color: #2dd4bf; }
+.cp-proyectos { background: rgba(139, 92, 246, 0.15); color: #a78bfa; }
+.cp-objetivos { background: rgba(236, 72, 153, 0.15); color: #f472b6; }
