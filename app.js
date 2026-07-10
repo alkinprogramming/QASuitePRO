@@ -1,15 +1,59 @@
 (function () {
     const SESSION_KEY = 'qaqc_current_user_id', PAGE_KEY = 'qaqc_last_page';
+    const SERVER_PAGE_SIZE = 50; 
     let appData = {
         usuarios: [], proyectos: [], objetivos: [], casos: [], bugs: [],
         ejecuciones: [], capturas: [], registroDiario: [], apis: [], mejoras: [],
-        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' }
+        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' }, comentarios: []
     };
     let currentUser = null, currentPage = 'dashboard', sortConfig = { field: null, dir: 'asc' };
     let searchTerm = '', pageSize = 10, currentPages = {};
     let notifications = [];
+    let commandPaletteOpen = false;
+    let commandPaletteSelectedIndex = 0;
+    let commandPaletteResults = [];
+    let loadedCollections = new Set();
+    let activeSubscriptions = {};
+
     const projectRequiredPages = ['casos', 'bugs', 'ejecuciones', 'diario', 'capturas', 'apis', 'trazabilidad', 'informes', 'historico', 'mejoras', 'objetivos'];
     const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario'];
+
+    const cache = {
+        data: {},
+        timestamps: {},
+        ttl: 60000, // 60 segundos de vida útil
+        
+        get(key) {
+            const now = Date.now();
+            if (this.timestamps[key] && (now - this.timestamps[key]) < this.ttl) {
+                return this.data[key];
+            }
+            return null; // Cache expirado
+        },
+        
+        set(key, value) {
+            this.data[key] = value;
+            this.timestamps[key] = Date.now();
+        },
+        
+        invalidate(key) {
+            delete this.data[key];
+            delete this.timestamps[key];
+        },
+        
+        invalidateAll() {
+            this.data = {};
+            this.timestamps = {};
+        },
+        
+        invalidateByPrefix(prefix) {
+            Object.keys(this.data).forEach(key => {
+                if (key.startsWith(prefix)) {
+                    this.invalidate(key);
+                }
+            });
+        }
+    };
 
     // ============ CONFIGURACIÓN FIREBASE ============
     const firebaseConfig = {
@@ -40,33 +84,54 @@
         if (!db) return Promise.resolve(undefined);
         return db.ref(key).once('value').then(snap => snap.val() !== null ? snap.val() : undefined);
     }
+
+    // Suscripción selectiva en tiempo real
     function suscribirseAlTiempoReal() {
         if (!db) return;
-
-        const colecciones = ["usuarios", "proyectos", "objetivos", "casos", "bugs",
-            "ejecuciones", "capturas", "registroDiario", "apis",
-            "mejoras", "trazabilidad", "configuracion", "notificaciones"];
-
-        colecciones.forEach(coleccion => {
-            db.ref(coleccion).on("value", (snapshot) => {
-                if (snapshot.exists()) {
-                    const key = coleccion;
-                    appData[key] = snapshot.val();
-
-                    // Actualizar notificaciones si cambia
-                    if (key === 'notificaciones') {
-                        notifications = appData.notificaciones || [];
-                        updateNotificationBadge();
-                    }
-
-                    // Re-renderizar si la app está visible
+        
+        // Suscribirse al nodo principal donde se guardan todos los datos
+        db.ref("qa_suite_pro_state").on("value", (snapshot) => {
+            if (snapshot.exists()) {
+                const data = snapshot.val();
+                
+                // Solo actualizar si hay datos válidos
+                if (data && typeof data === 'object') {
+                    // Preservar datos existentes si la respuesta está incompleta
+                    appData = {
+                        usuarios: Array.isArray(data.usuarios) ? data.usuarios : (appData.usuarios || []),
+                        proyectos: Array.isArray(data.proyectos) ? data.proyectos : (appData.proyectos || []),
+                        objetivos: Array.isArray(data.objetivos) ? data.objetivos : (appData.objetivos || []),
+                        casos: Array.isArray(data.casos) ? data.casos : (appData.casos || []),
+                        bugs: Array.isArray(data.bugs) ? data.bugs : (appData.bugs || []),
+                        ejecuciones: Array.isArray(data.ejecuciones) ? data.ejecuciones : (appData.ejecuciones || []),
+                        capturas: Array.isArray(data.capturas) ? data.capturas : (appData.capturas || []),
+                        registroDiario: Array.isArray(data.registroDiario) ? data.registroDiario : (appData.registroDiario || []),
+                        apis: Array.isArray(data.apis) ? data.apis : (appData.apis || []),
+                        mejoras: Array.isArray(data.mejoras) ? data.mejoras : (appData.mejoras || []),
+                        trazabilidad: Array.isArray(data.trazabilidad) ? data.trazabilidad : (appData.trazabilidad || []),
+                        comentarios: Array.isArray(data.comentarios) ? data.comentarios : (appData.comentarios || []),
+                        notificaciones: Array.isArray(data.notificaciones) ? data.notificaciones : [],
+                        configuracion: data.configuracion || { theme: 'dark', activeProject: '' }
+                    };
+                    
+                    notifications = appData.notificaciones || [];
+                    
+                    // Actualizar UI si está visible
                     if (currentUser && document.getElementById('appScreen').style.display !== 'none') {
                         renderPage(currentPage);
+                        updateNotificationBadge();
+                        populateProjectSelector();
                     }
+                    
+                    console.log("🔄 Datos sincronizados desde Firebase");
                 }
-            });
+            }
+            // Si no existe el snapshot, NO hacer nada (no sobrescribir con vacío)
         });
+        
+        console.log("✅ Suscripción activada para 'qa_suite_pro_state'");
     }
+
 
     // ============ DATA MANAGEMENT ============
 
@@ -75,13 +140,13 @@
             const cloudData = await getFromDB("qa_suite_pro_state");
             if (cloudData) {
                 appData = cloudData;
-                console.log("Datos cargados de la nube.");
+                console.log("✅ Datos cargados de la nube.");
             }
         } catch (e) {
             console.error("Error al cargar de Firebase:", e);
         }
-
-        // Asegurar que las colecciones existan siempre
+        
+        // Asegurar estructura mínima
         if (!Array.isArray(appData.trazabilidad)) appData.trazabilidad = [];
         if (!Array.isArray(appData.mejoras)) appData.mejoras = [];
         if (!Array.isArray(appData.apis)) appData.apis = [];
@@ -94,38 +159,11 @@
         if (!Array.isArray(appData.bugs)) appData.bugs = [];
         if (!Array.isArray(appData.ejecuciones)) appData.ejecuciones = [];
         if (!Array.isArray(appData.registroDiario)) appData.registroDiario = [];
+        if (!Array.isArray(appData.comentarios)) appData.comentarios = [];
         if (!appData.configuracion) appData.configuracion = { theme: 'dark', activeProject: '' };
-
+        
         notifications = appData.notificaciones || [];
         applyTheme();
-    }
-
-    async function saveData() {
-        appData.notificaciones = notifications;
-
-        try {
-            // Guardar cada colección por separado
-            const promises = [
-                saveToDB("usuarios", appData.usuarios),
-                saveToDB("proyectos", appData.proyectos),
-                saveToDB("objetivos", appData.objetivos),
-                saveToDB("casos", appData.casos),
-                saveToDB("bugs", appData.bugs),
-                saveToDB("ejecuciones", appData.ejecuciones),
-                saveToDB("capturas", appData.capturas),
-                saveToDB("registroDiario", appData.registroDiario),
-                saveToDB("apis", appData.apis),
-                saveToDB("mejoras", appData.mejoras),
-                saveToDB("trazabilidad", appData.trazabilidad),
-                saveToDB("configuracion", appData.configuracion),
-                saveToDB("notificaciones", appData.notificaciones)
-            ];
-
-            await Promise.all(promises);
-        } catch (error) {
-            console.error("Error al guardar en la nube:", error);
-            if (typeof toast === 'function') toast("Error al guardar en la nube", "error");
-        }
     }
 
     async function saveData() {
@@ -341,7 +379,7 @@
         const userExecs = appData.ejecuciones.length;
         const userTraces = appData.trazabilidad.filter(t => t.usuario === currentUser.usuario).length;
         const html = `
-            <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+            <div class="modal-overlay">
             <div class="modal profile-modal">
                 <div class="profile-header">
                 <div class="profile-avatar">${currentUser.nombre.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase()}</div>
@@ -481,11 +519,13 @@
         }
         navigateTo(currentPage);
         document.getElementById('activeProjectSelect').value = getActiveProject();
+        updateSidebarDisabledState();
     }
     window.onProjectChange = () => {
         appData.configuracion.activeProject = document.getElementById('activeProjectSelect').value;
         saveData();
         renderPage(currentPage);
+        updateSidebarDisabledState();
     };
     function populateProjectSelector() {
         const sel = document.getElementById('activeProjectSelect');
@@ -507,30 +547,64 @@
             sel.innerHTML += `<option value="${p.id}" ${p.id === getActiveProject() ? 'selected' : ''}>${p.nombre || p.id}</option>`
         );
     }
+
     window.navigateTo = function (page) {
+        // 1. Validación de permisos para Consultores
         if (currentUser.rol === 'Consultor' && !consultorPages.includes(page)) {
             toast('No tienes permiso para acceder a esta sección', 'error');
             return;
         }
-
-        // Verificar si el consultor tiene proyectos autorizados
+        
+        // 2. Bloquear acceso si no hay proyecto activo (excepto páginas exentas)
+        const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes', 'permisos'];
+        const requiereProyecto = projectRequiredPages.includes(page);
+        if (requiereProyecto && !getActiveProject() && !paginasExentas.includes(page)) {
+            toast('⚠️ Selecciona un proyecto antes de acceder a esta sección', 'warning');
+            if (currentPage !== page) {
+                page = 'dashboard';
+            } else {
+                return;
+            }
+        }
+        
+        // 3. Validación adicional para Consultores sin proyectos asignados
         if (currentUser.rol === 'Consultor' && projectRequiredPages.includes(page)) {
             if (!currentUser.proyectosAutorizados || currentUser.proyectosAutorizados.length === 0) {
                 toast('No tienes proyectos asignados. Contacta al administrador.', 'error');
                 page = 'dashboard';
-            } else if (!getActiveProject()) {
-                // Forzar selección de proyecto si es consultor
-                toast('Selecciona un proyecto para comenzar', 'warning');
             }
         }
-
+        
+        // 4. Navegación normal
         currentPage = page;
         saveLastPage(page);
         document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
         const activeNav = document.querySelector(`[data-page="${page}"]`);
         if (activeNav) activeNav.classList.add('active');
         renderPage(page);
+        
+        // 5. Actualizar estado visual del sidebar
+        updateSidebarDisabledState();
     };
+
+    function updateSidebarDisabledState() {
+        const proyectoActivo = getActiveProject();
+        const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes'];
+        
+        document.querySelectorAll('.nav-item').forEach(item => {
+            const page = item.dataset.page;
+            
+            // Si no hay proyecto activo y la página requiere proyecto
+            if (!proyectoActivo && projectRequiredPages.includes(page) && !paginasExentas.includes(page)) {
+                item.classList.add('disabled');
+                item.title = 'Selecciona un proyecto primero';
+            } else {
+                item.classList.remove('disabled');
+                item.removeAttribute('title');
+            }
+        });
+    }
+
     function renderPage(page) {
         const content = document.getElementById('contentArea');
         let html = '';
@@ -684,7 +758,7 @@
     function showConfirmModal(message, onConfirm, danger = false) {
         const container = document.getElementById('modalContainer');
         const html = `
-            <div class="modal-overlay" onclick="if(event.target===this)closeModal()">
+            <div class="modal-overlay">
             <div class="modal confirm-modal">
                 <div class="icon-warning"></div>
                 <p style="margin-bottom:20px; font-size:1rem; line-height:1.5; color:var(--text);">${message}</p>
@@ -705,7 +779,7 @@
 
     window.openModal = function (page, id, viewOnly = false) {
         const container = document.getElementById('modalContainer');
-        let html = `<div class="modal-overlay" onclick="if(event.target===this)closeModal()"><div class="modal">
+        let html = `<div class="modal-overlay"><div class="modal">
         <h3>${viewOnly ? '👁️ Detalle' : (id ? '✏️ Editar' : ' Nuevo')}</h3>`;
         html += generateForm(page, id, viewOnly);
         html += `<div class="modal-actions">
@@ -777,7 +851,6 @@
             }
             return opts;
         };
-        // --- NUEVO: Renderizar imagen de Captura QA si está vinculada ---
         const renderCaptura = (itemId) => {
             if (!itemId) return '';
             const cap = appData.capturas.find(c => c.vinculo === itemId && c.archivos);
@@ -795,80 +868,126 @@
         let h = '';
         switch (page) {
             case 'proyectos':
-                h += `<div class="form-group"><label>ID Proyecto</label><input value="${item?.id || 'PROY-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Nombre *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
-                    <div class="form-group"><label>Código Cliente</label><input value="${item?.codigoCliente || ''}" ${d} id="f_codigoCliente"></div>
-                    <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                    <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
-                    <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
-                    <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Planificado</option><option>Activo</option><option>Completado</option></select></div>`;
-                break;
+            h += `<div class="form-group"><label>ID Proyecto</label><input value="${item?.id || 'PROY-' + Date.now()}" ${d} id="f_id"></div>
+                <div class="form-group"><label>Nombre *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
+                <div class="form-group"><label>Código Cliente</label><input value="${item?.codigoCliente || ''}" ${d} id="f_codigoCliente"></div>
+                <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
+                <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
+                <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
+                <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                <option ${item?.estado === 'Planificado' ? 'selected' : ''}>Planificado</option>
+                <option ${item?.estado === 'Activo' ? 'selected' : ''}>Activo</option>
+                <option ${item?.estado === 'Completado' ? 'selected' : ''}>Completado</option>
+                </select></div>
+                `;
+            break;
             case 'objetivos':
-                h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'OBJ-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Objetivo *</label><input value="${item?.objetivo || ''}" ${d} id="f_objetivo"></div>
-                    <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                    <div class="form-group"><label>Responsable</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
-                    <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
-                    <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Pendiente</option><option>En progreso</option><option>Finalizado</option></select></div>`;
-                break;
+            h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'OBJ-' + Date.now()}" ${d} id="f_id"></div>
+                <div class="form-group"><label>Objetivo *</label><input value="${item?.objetivo || ''}" ${d} id="f_objetivo"></div>
+                <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Responsable</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
+                <div class="form-group"><label>Fecha Inicio</label><input type="date" value="${item?.fechaInicio || ''}" ${d} id="f_fechaInicio"></div>
+                <div class="form-group"><label>Fecha Fin</label><input type="date" value="${item?.fechaFin || ''}" ${d} id="f_fechaFin"></div>
+                <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                <option ${item?.estado === 'En progreso' ? 'selected' : ''}>En progreso</option>
+                <option ${item?.estado === 'Finalizado' ? 'selected' : ''}>Finalizado</option>
+                </select></div>
+                `;
+            break;
             case 'mejoras':
-                h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'MEJ-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
-                    <div class="form-group"><label>Tipo de Mejora</label><select ${d} id="f_tipo"><option>Mejora UX/UI</option><option>Nueva funcionalidad</option><option>Optimización Técnica</option></select></div>
-                    <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Pendiente de Revisión</option><option>Aprobado</option><option>Descartado</option></select></div>`;
-                break;
-                case 'usuarios':
-                const isConsultor = item?.rol === 'Consultor';
-                const proyectosAutorizados = item?.proyectosAutorizados || [];
-                h += `<div class="form-group"><label>ID</label><input value="${item?.id || Date.now()}" ${d} id="f_id" type="number"></div>
-                    <div class="form-group"><label>Nombre completo *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
-                    <div class="form-group"><label>Usuario *</label><input value="${item?.usuario || ''}" ${d} id="f_usuario"></div>
-                    <div class="form-group"><label>Contraseña *</label><input type="password" value="${item?.password || ''}" ${d} id="f_password"></div>
-                    <div class="form-group"><label>Rol</label><select ${d} id="f_rol" onchange="toggleProjectPermissions()"><option ${item?.rol === 'Admin' ? 'selected' : ''}>Admin</option><option ${item?.rol === 'Consultor' ? 'selected' : ''}>Consultor</option></select></div>
-                    <div class="form-group" id="project-permissions" style="${isConsultor ? '' : 'display:none;'}">
-                        <label>📁 Proyectos Autorizados</label>
-                        <div class="checkbox-list" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                            ${appData.proyectos.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay proyectos creados</div>' : 
-                            appData.proyectos.map(p => `
-                                <label class="checkbox-item" style="display:flex; align-items:center; gap:8px; padding:6px 0;">
-                                    <input type="checkbox" class="project-perm-cb" value="${p.id}" ${proyectosAutorizados.includes(p.id) ? 'checked' : ''}>
-                                    <span>${p.nombre || p.id}</span>
-                                </label>
-                            `).join('')}
-                        </div>
-                        <small style="color:var(--text2); display:block; margin-top:8px;">Selecciona los proyectos que este consultor podrá ver y gestionar</small>
-                    </div>`;
-                break;            case 'casos':
+            h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'MEJ-' + Date.now()}" ${d} id="f_id"></div>
+                <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
+                <div class="form-group"><label>Tipo de Mejora</label><select ${d} id="f_tipo"><option>Mejora UX/UI</option><option>Nueva funcionalidad</option><option>Optimización Técnica</option></select></div>
+                <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                <option ${item?.estado === 'Pendiente de Revisión' ? 'selected' : ''}>Pendiente de Revisión</option>
+                <option ${item?.estado === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
+                <option ${item?.estado === 'Descartado' ? 'selected' : ''}>Descartado</option>
+                </select></div>
+                `;
+            break;
+            case 'usuarios':
+            const isConsultor = item?.rol === 'Consultor';
+            const proyectosAutorizados = item?.proyectosAutorizados || [];
+            h += `<div class="form-group"><label>ID</label><input value="${item?.id || Date.now()}" ${d} id="f_id" type="number"></div>
+                <div class="form-group"><label>Nombre completo *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
+                <div class="form-group"><label>Usuario *</label><input value="${item?.usuario || ''}" ${d} id="f_usuario"></div>
+                <div class="form-group"><label>Contraseña *</label><input type="password" value="${item?.password || ''}" ${d} id="f_password"></div>
+                <div class="form-group"><label>Rol</label><select ${d} id="f_rol" onchange="toggleProjectPermissions()"><option ${item?.rol === 'Admin' ? 'selected' : ''}>Admin</option><option ${item?.rol === 'Consultor' ? 'selected' : ''}>Consultor</option></select></div>
+                <div class="form-group" id="project-permissions" style="${isConsultor ? '' : 'display:none;'}">
+                    <label>📁 Proyectos Autorizados</label>
+                    <div class="checkbox-list" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">
+                        ${appData.proyectos.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay proyectos creados</div>' : 
+                        appData.proyectos.map(p => `
+                            <label class="checkbox-item" style="display:flex; align-items:center; gap:8px; padding:6px 0;">
+                                <input type="checkbox" class="project-perm-cb" value="${p.id}" ${proyectosAutorizados.includes(p.id) ? 'checked' : ''}>
+                                <span>${p.nombre || p.id}</span>
+                            </label>
+                        `).join('')}
+                    </div>
+                    <small style="color:var(--text2); display:block; margin-top:8px;">Selecciona los proyectos que este consultor podrá ver y gestionar</small>
+                </div>`;
+                break;            
+                case 'casos':
                 h += `<div class="form-group"><label>ID Caso</label><input value="${item?.id || 'CASO-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
-                    <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad"><option>Crítica</option><option>Alta</option><option>Media</option><option>Baja</option></select></div>
-                    <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
-                    <div class="form-group"><label>Actor</label><input value="${item?.actor || ''}" ${d} id="f_actor"></div>
-                    <div class="form-group"><label>Descripción del Requisito</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                    <div class="form-group"><label>Flujo de Pasos</label><textarea ${d} id="f_flujo">${item?.flujo || ''}</textarea></div>
-                    <div class="form-group"><label>Input del Cliente</label><input value="${item?.inputCliente || ''}" ${d} id="f_inputCliente"></div>
-                    <div class="form-group"><label>Criterios de Aceptación (BDD)</label><textarea ${d} id="f_criterios">${item?.criterios || ''}</textarea></div>
-                    <div class="form-group"><label>Resultado Esperado</label><textarea ${d} id="f_resultadoEsperado">${item?.resultadoEsperado || ''}</textarea></div>
-                    <div class="form-group"><label>Estado de Ejecución</label><select ${d} id="f_estado"><option>Pendiente</option><option>Pasado</option><option>Fallido</option></select></div>
-                    <div class="form-group"><label>📝 Comentarios / Resultado Obtenido</label><textarea ${d} id="f_comentarios" placeholder="Añade aquí los resultados de la prueba...">${item?.comentarios || ''}</textarea></div>
-   ${renderCaptura(item?.id)}`; // Renderiza la captura vinculada
+                <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
+                <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad">
+                <option ${item?.prioridad === 'Crítica' ? 'selected' : ''}>Crítica</option>
+                <option ${item?.prioridad === 'Alta' ? 'selected' : ''}>Alta</option>
+                <option ${item?.prioridad === 'Media' ? 'selected' : ''}>Media</option>
+                <option ${item?.prioridad === 'Baja' ? 'selected' : ''}>Baja</option>
+                </select></div>
+                <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
+                <div class="form-group"><label>Actor</label><input value="${item?.actor || ''}" ${d} id="f_actor"></div>
+                <div class="form-group"><label>Descripción del Requisito</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Flujo de Pasos</label><textarea ${d} id="f_flujo">${item?.flujo || ''}</textarea></div>
+                <div class="form-group"><label>Input del Cliente</label><input value="${item?.inputCliente || ''}" ${d} id="f_inputCliente"></div>
+                <div class="form-group"><label>Criterios de Aceptación (BDD)</label><textarea ${d} id="f_criterios">${item?.criterios || ''}</textarea></div>
+                <div class="form-group"><label>Resultado Esperado</label><textarea ${d} id="f_resultadoEsperado">${item?.resultadoEsperado || ''}</textarea></div>
+                <div class="form-group"><label>Estado de Ejecución</label>
+                    <select ${d} id="f_estado">
+                        <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                        <option ${item?.estado === 'Pasado' ? 'selected' : ''}>Pasado</option>
+                        <option ${item?.estado === 'Fallido' ? 'selected' : ''}>Fallido</option>
+                    </select>
+                </div>
+                `;
+                if (id) {
+                    h += `<div id="commentsContainer_caso_${id}"></div>`;
+                    setTimeout(() => {
+                        renderCommentsSection('caso', id);
+                    }, 50);
+                }
                 break;
-            case 'bugs':
+                case 'bugs':
                 h += `<div class="form-group"><label>ID Bug</label><input value="${item?.id || 'BUG-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
-                    <div class="form-group"><label>Caso Relacionado</label><input value="${item?.casoRelacionado || ''}" ${d} id="f_casoRelacionado"></div>
-                    <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
-                    <div class="form-group"><label>Resumen Técnico</label><textarea ${d} id="f_resumen">${item?.resumen || ''}</textarea></div>
-                    <div class="form-group"><label>Descripción Detallada</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                    <div class="form-group"><label>Severidad</label><select ${d} id="f_severidad"><option>Bloqueante</option><option>Crítica</option><option>Mayor</option><option>Menor</option></select></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Abierto</option><option>En revisión</option><option>Solucionado</option></select></div>
-                    <div class="form-group"><label>📝 Comentarios / Seguimiento</label><textarea ${d} id="f_comentarios" placeholder="Añade detalles sobre la resolución o hallazgos...">${item?.comentarios || ''}</textarea></div>
-   ${renderCaptura(item?.id)}`; // Renderiza la captura vinculada
+                <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
+                <div class="form-group"><label>Caso Relacionado</label><input value="${item?.casoRelacionado || ''}" ${d} id="f_casoRelacionado"></div>
+                <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
+                <div class="form-group"><label>Resumen Técnico</label><textarea ${d} id="f_resumen">${item?.resumen || ''}</textarea></div>
+                <div class="form-group"><label>Descripción Detallada</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Severidad</label><select ${d} id="f_severidad">
+                <option ${item?.severidad === 'Bloqueante' ? 'selected' : ''}>Bloqueante</option>
+                <option ${item?.severidad === 'Crítica' ? 'selected' : ''}>Crítica</option>
+                <option ${item?.severidad === 'Mayor' ? 'selected' : ''}>Mayor</option>
+                <option ${item?.severidad === 'Menor' ? 'selected' : ''}>Menor</option>
+                </select></div>
+                <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                <option ${item?.estado === 'Abierto' ? 'selected' : ''}>Abierto</option>
+                <option ${item?.estado === 'En revisión' ? 'selected' : ''}>En revisión</option>
+                <option ${item?.estado === 'Solucionado' ? 'selected' : ''}>Solucionado</option>
+                </select></div>
+                `;
+                if (id) {
+                    h += `<div id="commentsContainer_bug_${id}"></div>`;
+                    setTimeout(() => {
+                        renderCommentsSection('bug', id);
+                    }, 50);
+                }
                 break;
-            case 'ejecuciones':
+                case 'ejecuciones':
                 const casosDisponibles = filterByProject(appData.casos);
                 const casosAsociados = item?.casosAsociados ? (() => {
                     try {
@@ -878,24 +997,24 @@
                     } catch (e) { return []; }
                 })() : [];
                 h += `<div class="form-group"><label>ID Ejecución</label><input value="${item?.id || 'EJEC-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Nombre del Ciclo *</label><input value="${item?.nombreCiclo || ''}" ${d} id="f_nombreCiclo"></div>
-                    <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
-                    <div class="form-group"><label>Fecha</label><input type="date" value="${item?.fecha || ''}" ${d} id="f_fecha"></div>
-                    <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
-                    <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>
-                    <div class="form-group"><label>Casos Asociados</label>
-                        <div class="checkbox-list">
-                    ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
-                        casosDisponibles.map(c => `
-                                <label class="checkbox-item">
-                                <input type="checkbox" class="caso-check" value="${c.id}" ${casosAsociados.includes(c.id) ? 'checked' : ''}>
-                                <span><b>${c.id}</b> - ${c.titulo}</span>
-                                </label>
-                            `).join('')}
-                            </div>
-                        </div>`;
+                <div class="form-group"><label>Nombre del Ciclo *</label><input value="${item?.nombreCiclo || ''}" ${d} id="f_nombreCiclo"></div>
+                <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
+                <div class="form-group"><label>Fecha</label><input type="date" value="${item?.fecha || ''}" ${d} id="f_fecha"></div>
+                <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
+                <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>
+                <div class="form-group"><label>Casos Asociados</label>
+                <div class="checkbox-list">
+                ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
+                casosDisponibles.map(c => `
+                        <label class="checkbox-item">
+                        <input type="checkbox" class="caso-check" value="${c.id}" ${casosAsociados.includes(c.id) ? 'checked' : ''}>
+                        <span><b>${c.id}</b> - ${c.titulo}</span>
+                        </label>
+                    `).join('')}
+                    </div>
+                </div>`;
                 break;
-            case 'diario':
+                case 'diario':
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'DIA-' + Date.now()}" ${d} id="f_id"></div>
                     <div class="form-group"><label>Colaborador QA</label><select ${d} id="f_colaborador">${userOpts(item?.colaborador || currentUser?.nombre)}</select></div>
                     <div class="form-group"><label>Mes</label><input type="month" value="${item?.mes || ''}" ${d} id="f_mes"></div>
@@ -903,27 +1022,42 @@
                     <div class="form-group"><label>Descripción de actividad</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
                     <div class="form-group"><label>Horas invertidas</label><input type="number" step="0.5" value="${item?.horas || ''}" ${d} id="f_horas"></div>`;
                 break;
-            case 'capturas':
+                case 'capturas':
                 h += `<div class="form-group"><label>ID Captura</label><input value="${item?.id || 'CAP-' + Date.now()}" id="f_id" ${d}></div>
-                    <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion || ''}" id="f_descripcion" ${d}></div>
-                    <div class="form-group"><label>🔗 ID Caso o Bug Vinculado</label><select id="f_vinculo" ${d}>${getCasosBugsOpts(item?.vinculo)}</select></div>
-                    <div class="form-group">
-                        <label>Subir Imagen</label>
-                        <input type="file" id="f_archivos" accept="image/*" onchange="previsualizarCapturaQA(event, 'preview-box')" style="padding: 5px;" ${d}>
-                        <div id="preview-box">${item?.archivos ? `<img src="${item.archivos}" style="max-height: 180px; border-radius: 8px; margin-top:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">` : ''}</div>
-                        <input type="hidden" id="f_archivos_base64" value="${item?.archivos || ''}">
-                    </div>`;
+                <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion || ''}" id="f_descripcion" ${d}></div>
+                <div class="form-group"><label>🔗 ID Caso o Bug Vinculado</label><select id="f_vinculo" ${d}>${getCasosBugsOpts(item?.vinculo)}</select></div>
+                <div class="form-group">
+                    <label>Subir Imagen</label>
+                    <input type="file" id="f_archivos" accept="image/*" onchange="previsualizarCapturaQA(event, 'preview-box')" style="padding: 5px;" ${d}>
+                    <div id="preview-box">${item?.archivos ? `<img src="${item.archivos}" style="max-height: 180px; border-radius: 8px; margin-top:10px; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">` : ''}</div>
+                    <input type="hidden" id="f_archivos_base64" value="${item?.archivos || ''}">
+                </div>`;
                 break;
-            case 'apis':
+                case 'apis':
                 h += `<div class="form-group"><label>ID API</label><input value="${item?.id || 'API-' + Date.now()}" ${d} id="f_id"></div>
                     <div class="form-group"><label>Nombre API</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
                     <div class="form-group"><label>Endpoint</label><input value="${item?.endpoint || ''}" ${d} id="f_endpoint"></div>
-                    <div class="form-group"><label>Método</label><select ${d} id="f_metodo"><option>GET</option><option>POST</option><option>PUT</option><option>DELETE</option></select></div>
+                    <div class="form-group"><label>Método</label><select ${d} id="f_metodo">
+                    <option ${item?.metodo === 'GET' ? 'selected' : ''}>GET</option>
+                    <option ${item?.metodo === 'POST' ? 'selected' : ''}>POST</option>
+                    <option ${item?.metodo === 'PUT' ? 'selected' : ''}>PUT</option>
+                    <option ${item?.metodo === 'DELETE' ? 'selected' : ''}>DELETE</option>
+                    </select></div>
                     <div class="form-group"><label>Request</label><textarea ${d} id="f_request">${item?.request || ''}</textarea></div>
                     <div class="form-group"><label>Response esperada</label><textarea ${d} id="f_respEsperada">${item?.respEsperada || ''}</textarea></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado"><option>Correcta</option><option>Error</option><option>Pendiente</option></select></div>
-                    <div class="form-group"><label>📝 Comentarios de Validación</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre los resultados de la prueba de API...">${item?.comentarios || ''}</textarea></div>`;
-                break;
+                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                    <option ${item?.estado === 'Correcta' ? 'selected' : ''}>Correcta</option>
+                    <option ${item?.estado === 'Error' ? 'selected' : ''}>Error</option>
+                    <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                    </select></div>
+                    `;
+                    if (id) {
+                        h += `<div id="commentsContainer_api_${id}"></div>`;
+                        setTimeout(() => {
+                            renderCommentsSection('api', id);
+                        }, 50);
+                    }
+                    break;
         }
         return h;
     }
@@ -1056,20 +1190,29 @@
     }
     // ============ GENERIC TABLE ============
     function renderTable(page, cols, data, rowFn, showActions = true) {
-        if (!data || !Array.isArray(data)) data = [];
+        // Si no hay datos, mostrar mensaje
+        if (!data || !Array.isArray(data)) {
+            data = [];
+        }
+        
+        // Filtrar por término de búsqueda
         let filtered = searchTerm ? data.filter(i => JSON.stringify(i).toLowerCase().includes(searchTerm)) : data;
+        
+        // Ordenar si está configurado
         if (sortConfig.field) {
             filtered.sort((a, b) =>
                 (a[sortConfig.field] || '').toString().localeCompare((b[sortConfig.field] || '').toString()) *
                 (sortConfig.dir === 'asc' ? 1 : -1)
             );
         }
+        
         const totalPages = Math.ceil(filtered.length / pageSize) || 1;
         const pg = Math.min(currentPages[page] || 1, totalPages);
         currentPages[page] = pg;
         const paged = filtered.slice((pg - 1) * pageSize, pg * pageSize);
+        
         let h = `<div class="table-container"><div class="table-toolbar">
-            <input class="search-input" placeholder="🔍 Buscar..." value="${searchTerm}">
+            <input class="search-input" placeholder=" Buscar..." value="${searchTerm}">
             <select class="page-size-select">
             <option ${pageSize === 5 ? 'selected' : ''}>5</option>
             <option ${pageSize === 10 ? 'selected' : ''}>10</option>
@@ -1079,15 +1222,19 @@
             <span style="color:var(--text2); font-size:0.85rem;">${filtered.length} resultados</span>
             ${showActions ? `<button class="btn btn-accent btn-sm" data-action="create">➕ Nuevo</button>` : ''}
             </div><div style="overflow-x:auto;"><table><thead><tr>`;
+        
         cols.forEach(c => h += `<th data-sort="${c.field}">${c.label} ${sortConfig.field === c.field ? (sortConfig.dir === 'asc' ? '▲' : '▼') : ''}</th>`);
         if (showActions) h += '<th style="width:120px;">Acciones</th>';
         h += '</tr></thead><tbody>';
+        
         if (paged.length === 0) {
             h += `<tr><td colspan="${cols.length + (showActions ? 1 : 0)}" style="text-align:center;padding:40px;">
-            <div class="empty-state-icon">📭</div>
+            <div class="empty-state-icon"></div>
             <div style="color:var(--text2);">No hay registros</div>
             </td></tr>`;
         }
+        
+        // Renderizar solo las filas visibles (mejora de rendimiento)
         paged.forEach(item => {
             h += `<tr>${rowFn(item)}`;
             if (showActions) h += `<td class="actions-cell">
@@ -1097,31 +1244,33 @@
             </td>`;
             h += `</tr>`;
         });
+        
         h += `</tbody></table></div>`;
-        // Paginación mejorada - solo mostrar si hay más de una página
+        
+        // Paginación optimizada
         if (totalPages > 1) {
             h += `<div class="pagination">`;
-            // Botón anterior
             if (pg > 1) {
                 h += `<button data-pg="${pg - 1}">◀ Anterior</button>`;
             }
-            // Números de página
             for (let i = 1; i <= totalPages; i++) {
-                // Mostrar páginas cercanas a la actual
                 if (i === 1 || i === totalPages || (i >= pg - 2 && i <= pg + 2)) {
                     h += `<button data-pg="${i}" class="${i === pg ? 'active-page-btn' : ''}">${i}</button>`;
                 } else if (i === pg - 3 || i === pg + 3) {
                     h += `<button disabled style="opacity:0.5;">...</button>`;
                 }
             }
-            // Botón siguiente
             if (pg < totalPages) {
                 h += `<button data-pg="${pg + 1}">Siguiente ▶</button>`;
             }
             h += `</div>`;
         }
+        
         return h + '</div>';
     }
+
+
+
     const itemsPerPage = 10; // Límite de elementos por página
     function generarPaginador(totalItems, currentPage, funcionCambioPagina) {
         const totalPages = Math.ceil(totalItems / itemsPerPage);
@@ -1506,7 +1655,7 @@ ${renderDonutChart('Severidad Bugs', [
 
         const container = document.getElementById('modalContainer');
         const html = `
-            <div class="modal-overlay" onclick="if(event.target===this)closeCaseDetail()">
+            <div class="modal-overlay">
             <div class="modal" style="max-width:900px;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
                     <h3 style="margin:0;">📋 ${caseRef.id} - ${caseRef.titulo}</h3>
@@ -1649,79 +1798,68 @@ ${renderDonutChart('Severidad Bugs', [
         const bugId = 'BUG-' + Date.now();
 
         const html = `
-        <div class="modal-overlay" onclick="if(event.target===this)closeBugModal()">
-        <div class="modal" style="max-width:700px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
-                <h3 style="margin:0;">🐛 Crear Bug desde Ejecución</h3>
-                <button class="btn btn-sm btn-outline" onclick="closeBugModal()">✕ Cerrar</button>
-            </div>
-            
-            <div style="background:var(--card-alt); padding:15px; border-radius:8px; margin-bottom:20px; border-left:4px solid var(--danger);">
-                <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px;">ℹ️ Bug generado automáticamente desde:</div>
-                <div style="font-size:0.9rem;">
-                    <strong>Ejecución:</strong> ${execRef?.id || execId} - ${execRef?.nombreCiclo || ''}<br>
-                    <strong>Caso:</strong> ${caseRef.id} - ${caseRef.titulo}<br>
-                    <strong>Estado:</strong> <span style="color:var(--danger); font-weight:600;">${status}</span>
+        <div class="modal-overlay">
+            <div class="modal" style="max-width:700px;">
+
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:20px;">
+                    <h3 style="margin:0;">🐛 Crear Bug desde Ejecución</h3>
+                    <button class="btn btn-sm btn-outline" onclick="closeBugModal()">✕ Cerrar</button>
+                </div>
+                
+                <div style="background:var(--card-alt); padding:15px; border-radius:8px; margin-bottom:20px; border-left:4px solid var(--danger);">
+                    <div style="font-size:0.85rem; color:var(--text2); margin-bottom:8px;">ℹ️ Bug generado automáticamente desde:</div>
+                    <div style="font-size:0.9rem;">
+                        <strong>Ejecución:</strong> ${execRef?.id || execId} - ${execRef?.nombreCiclo || ''}<br>
+                        <strong>Caso:</strong> ${caseRef.id} - ${caseRef.titulo}<br>
+                        <strong>Estado:</strong> <span style="color:var(--danger); font-weight:600;">${status}</span>
+                    </div>
+                </div>
+                
+                <div class="form-group">
+                    <label>ID Bug</label>
+                    <input value="${bugId}" id="f_bug_id" readonly style="background:var(--bg2);">
+                </div>
+                
+                <div class="form-group">
+                    <label>Título *</label>
+                    <input value="Fallo en ${caseRef.id}: ${caseRef.titulo}" id="f_bug_titulo">
+                </div>
+                
+                <div class="form-group">
+                    <label>Caso Relacionado</label>
+                    <input value="${caseRef.id}" id="f_bug_casoRelacionado" readonly style="background:var(--bg2);">
+                </div>
+                
+                <div class="form-group">
+                    <label>Severidad</label>
+                    <select id="f_bug_severidad">
+                        <option>Bloqueante</option>
+                        <option selected>Crítica</option>
+                        <option>Mayor</option>
+                        <option>Menor</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Resumen Técnico</label>
+                    <textarea id="f_bug_resumen" placeholder="Describe brevemente el fallo...">El caso de prueba ${caseRef.id} ha fallado durante la ejecución ${execRef?.id || ''}. Estado: ${status}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Descripción Detallada</label>
+                    <textarea id="f_bug_descripcion" rows="5" placeholder="Pasos para reproducir, entorno, etc.">Caso de uso: ${caseRef.id} - ${caseRef.titulo} Ejecución: ${execRef?.id || ''} - ${execRef?.nombreCiclo || ''} Resultado esperado: ${caseRef.resultadoEsperado || 'No definido'} Estado obtenido: ${status}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Estado</label>
+                    <select id="f_bug_estado">
+                        <option selected>Abierto</option>
+                        <option>En revisión</option>
+                    </select>
+                </div>
+                <div class="modal-actions" style="margin-top:20px;">
+                    <button class="btn btn-accent" onclick="saveBugFromExecution('${bugId}', '${caseRef.id}', '${execId}', '${status}')">💾 Guardar Bug</button>
+                    <button class="btn btn-outline" onclick="closeBugModal()">Cancelar</button>
                 </div>
             </div>
-            
-            <div class="form-group">
-                <label>ID Bug</label>
-                <input value="${bugId}" id="f_bug_id" readonly style="background:var(--bg2);">
-            </div>
-            
-            <div class="form-group">
-                <label>Título *</label>
-                <input value="Fallo en ${caseRef.id}: ${caseRef.titulo}" id="f_bug_titulo">
-            </div>
-            
-            <div class="form-group">
-                <label>Caso Relacionado</label>
-                <input value="${caseRef.id}" id="f_bug_casoRelacionado" readonly style="background:var(--bg2);">
-            </div>
-            
-            <div class="form-group">
-                <label>Severidad</label>
-                <select id="f_bug_severidad">
-                    <option>Bloqueante</option>
-                    <option selected>Crítica</option>
-                    <option>Mayor</option>
-                    <option>Menor</option>
-                </select>
-            </div>
-            
-            <div class="form-group">
-                <label>Resumen Técnico</label>
-                <textarea id="f_bug_resumen" placeholder="Describe brevemente el fallo...">El caso de prueba ${caseRef.id} ha fallado durante la ejecución ${execRef?.id || ''}. Estado: ${status}</textarea>
-            </div>
-            
-            <div class="form-group">
-                <label>Descripción Detallada</label>
-                <textarea id="f_bug_descripcion" rows="5" placeholder="Pasos para reproducir, entorno, etc.">Caso de uso: ${caseRef.id} - ${caseRef.titulo}
-
-Ejecución: ${execRef?.id || ''} - ${execRef?.nombreCiclo || ''}
-
-Resultado esperado:
-${caseRef.resultadoEsperado || 'No definido'}
-
-Estado obtenido: ${status}</textarea>
-            </div>
-            
-            <div class="form-group">
-                <label>Estado</label>
-                <select id="f_bug_estado">
-                    <option selected>Abierto</option>
-                    <option>En revisión</option>
-                </select>
-            </div>
-            
-            <div class="modal-actions" style="margin-top:20px;">
-                <button class="btn btn-accent" onclick="saveBugFromExecution('${bugId}', '${caseRef.id}', '${execId}', '${status}')">💾 Guardar Bug</button>
-                <button class="btn btn-outline" onclick="closeBugModal()">Cancelar</button>
-            </div>
-        </div>
-        </div>
-    `;
+        </div>`;
 
         container.innerHTML = html;
         document.addEventListener('keydown', escCloseModal);
@@ -2000,6 +2138,7 @@ Estado obtenido: ${status}</textarea>
         a.click();
         toast('📤 Datos exportados', 'success');
     }
+
     window.importData = function (input) {
         const file = input.files[0];
         if (!file) return;
@@ -2007,20 +2146,56 @@ Estado obtenido: ${status}</textarea>
         reader.onload = e => {
             try {
                 const data = JSON.parse(e.target.result);
-                if (data.usuarios && confirm('¿Sobrescribir datos actuales en FIREBASE?')) {
-                    appData = data;
-                    saveData();
-                    populateProjectSelector();
-                    navigateTo('dashboard');
-                    toast('📥 Datos importados', 'success');
+                
+                // Validar que sea un archivo válido
+                if (!data.usuarios && !data.casos && !data.proyectos) {
+                    return toast('Archivo JSON inválido: no contiene datos de QA Suite', 'error');
+                }
+                
+                if (confirm('¿Sobrescribir datos actuales en FIREBASE?\n\nEsta acción no se puede deshacer.')) {
+                    // Fusionar datos importados con la estructura actual
+                    appData = {
+                        usuarios: data.usuarios || appData.usuarios || [],
+                        proyectos: data.proyectos || appData.proyectos || [],
+                        objetivos: data.objetivos || appData.objetivos || [],
+                        casos: data.casos || appData.casos || [],
+                        bugs: data.bugs || appData.bugs || [],
+                        ejecuciones: data.ejecuciones || appData.ejecuciones || [],
+                        capturas: data.capturas || appData.capturas || [],
+                        registroDiario: data.registroDiario || appData.registroDiario || [],
+                        apis: data.apis || appData.apis || [],
+                        mejoras: data.mejoras || appData.mejoras || [],
+                        trazabilidad: data.trazabilidad || appData.trazabilidad || [],
+                        comentarios: data.comentarios || appData.comentarios || [],
+                        notificaciones: data.notificaciones || [],
+                        configuracion: data.configuracion || appData.configuracion || { theme: 'dark', activeProject: '' }
+                    };
+                    
+                    notifications = appData.notificaciones || [];
+                    
+                    // Guardar en Firebase
+                    saveData().then(() => {
+                        populateProjectSelector();
+                        navigateTo('dashboard');
+                        toast('📥 Datos importados correctamente', 'success');
+                        updateNotificationBadge();
+                    }).catch(err => {
+                        console.error('Error al guardar datos importados:', err);
+                        toast('Error al guardar en Firebase', 'error');
+                    });
                 }
             } catch (ex) {
-                toast('Archivo inválido', 'error');
+                console.error('Error al procesar archivo:', ex);
+                toast('Archivo JSON inválido o corrupto', 'error');
             }
+        };
+        reader.onerror = () => {
+            toast('Error al leer el archivo', 'error');
         };
         reader.readAsText(file);
         input.value = '';
     };
+
     // ============ KEYBOARD SHORTCUTS ============
     document.addEventListener('keydown', (e) => {
         if (e.ctrlKey && e.key === 'k') {
@@ -2057,43 +2232,435 @@ Estado obtenido: ${status}</textarea>
             reader.readAsDataURL(file);
         }
     };
-    // ============ INIT ============
-    async function init() {
-        await loadData();
 
-        suscribirseAlTiempoReal();
+    // ============ SISTEMA DE COMENTARIOS ============
 
-        // Crear datos base si no existen usuarios
-        if (!appData.usuarios || appData.usuarios.length === 0) {
-            appData.usuarios.push({ id: 1, nombre: 'Admin Sistema', usuario: 'admin', password: 'password', rol: 'Admin' });
+    window.addComment = (entityType, entityId) => {
+        const input = document.getElementById(`commentInput_${entityType}_${entityId}`);
+        const text = input.value.trim();
+        if (!text) return toast('El comentario no puede estar vacío', 'warning');
+
+        const newComment = {
+            id: Date.now(),
+            entityType: entityType, // Ej: 'caso', 'bug', 'ejecucion', 'api'
+            entityId: entityId,
+            texto: text,
+            creadoPor: currentUser.id,
+            nombreAutor: currentUser.nombre,
+            fecha: new Date().toISOString()
+        };
+
+        appData.comentarios.push(newComment);
+        saveData();
+        
+        // Opcional: Registrar en trazabilidad
+        // registrarTrazabilidad(`Comentó en ${entityType} #${entityId}`);
+
+        input.value = '';
+        renderCommentsSection(entityType, entityId); // Refrescar la vista
+        toast('Comentario añadido', 'success');
+    };
+
+    window.renderCommentsSection = (entityType, entityId) => {
+        const container = document.getElementById(`commentsContainer_${entityType}_${entityId}`);
+        if (!container) return;
+        
+        const comentarios = appData.comentarios.filter(c => c.entityType === entityType && c.entityId == entityId);
+        let html = `<div class="comments-list" style="margin-top: 15px; max-height: 250px; overflow-y: auto; padding-right: 5px;">`;
+        
+        if(comentarios.length === 0) {
+            html += `<p style="color: var(--text2); font-size: 0.9rem; text-align: center; padding: 15px 0;">No hay comentarios aún.</p>`;
+        } else {
+            comentarios.forEach(c => {
+                const isOwner = currentUser.rol === 'Admin' || c.creadoPor == currentUser.id;
+                //const dateStr = new Date(c.fecha).toLocaleString();
+                const dateStr = new Date(c.fecha).toLocaleString('es-ES', {
+                    timeZone: 'Europe/Madrid', // O tu zona horaria local
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+                html += `
+                <div class="comment-item" style="background: var(--bg); padding: 12px; border-radius: 8px; margin-bottom: 10px; border: 1px solid var(--border);">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; align-items: center;">
+                        <strong style="font-size: 0.85rem; color: var(--accent);"><span style="font-size: 1rem;">💬</span> ${c.nombreAutor}</strong>
+                        <span style="font-size: 0.75rem; color: var(--text2);">${dateStr}</span>
+                    </div>
+                    <div style="font-size: 0.9rem; color: var(--text); line-height: 1.4;">
+                        ${c.texto}
+                    </div>
+                    ${isOwner ? `<button onclick="deleteComment(${c.id}, '${entityType}', '${entityId}')" style="background: none; border: none; color: var(--danger); font-size: 0.8rem; cursor: pointer; margin-top: 8px; padding: 0; opacity: 0.8;">Eliminar</button>` : ''}
+                </div>`;
+            });
+        }
+        html += `</div>`;
+        
+        html += `
+        <div class="comment-input-area" style="display: flex; gap: 10px; margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
+            <input type="text" id="commentInput_${entityType}_${entityId}" placeholder="Escribe un comentario..." class="form-control" style="flex: 1; padding: 10px 15px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text);" onkeypress="if(event.key==='Enter') addComment('${entityType}', '${entityId}')">
+            <button class="btn btn-outline" onclick="addComment('${entityType}', '${entityId}')">Enviar</button>
+        </div>`;
+        container.innerHTML = html;
+    };
+
+    window.deleteComment = (id, entityType, entityId) => {
+        showConfirmModal('¿Estás seguro de eliminar este comentario?', () => {
+            appData.comentarios = appData.comentarios.filter(c => String(c.id) !== String(id));
             saveData();
+            renderCommentsSection(entityType, entityId);
+            toast('Comentario eliminado', 'success');
+        });
+    };
+
+    window.openCommandPalette = function() {
+        const palette = document.getElementById('commandPalette');
+        const input = document.getElementById('commandPaletteInput');
+        
+        if (palette) {
+            palette.style.display = 'flex';
+            input.value = '';
+            input.focus();
+            commandPaletteOpen = true;
+            commandPaletteSelectedIndex = 0;
+            commandPaletteResults = [];
+            renderCommandPaletteResults([]);
         }
-
-        if (!restoreSession()) {
-            document.getElementById('authScreen').style.display = 'flex';
-            document.getElementById('appScreen').style.display = 'none';
+    };
+    
+    window.closeCommandPalette = function() {
+        const palette = document.getElementById('commandPalette');
+        if (palette) {
+            palette.style.display = 'none';
+            commandPaletteOpen = false;
+            commandPaletteResults = [];
         }
+    };
+    
+    window.toggleCommandPalette = function() {
+        if (commandPaletteOpen) {
+            closeCommandPalette();
+        } else {
+            openCommandPalette();
+        }
+    };
 
-        // Validación adicional post-carga
-        if (!appData.casos) appData.casos = [];
-        if (!appData.bugs) appData.bugs = [];
-        if (!appData.proyectos) appData.proyectos = [];
-        if (!appData.ejecuciones) appData.ejecuciones = [];
-        if (!appData.apis) appData.apis = [];
-
-        // Suscripción a cambios en tiempo real
-        suscribirseAlTiempoReal("qa_suite_pro_state", (nuevoEstado) => {
-            if (nuevoEstado) {
-                appData = nuevoEstado;
-                notifications = appData.notificaciones || [];
-                if (currentUser && document.getElementById('appScreen').style.display !== 'none') {
-                    renderPage(currentPage);
-                    updateNotificationBadge();
+    function searchGlobal(query) {
+        if (!query || query.length < 2) return [];
+        
+        const results = [];
+        const q = query.toLowerCase();
+        const ap = getActiveProject();
+        
+        // Buscar en Casos
+        appData.casos.forEach(caso => {
+            if (!ap || caso.proyecto === ap) {
+                if (caso.id.toLowerCase().includes(q) || 
+                    (caso.titulo && caso.titulo.toLowerCase().includes(q)) ||
+                    (caso.actor && caso.actor.toLowerCase().includes(q))) {
+                    results.push({
+                        type: 'casos',
+                        icon: '📋',
+                        title: caso.titulo || caso.id,
+                        subtitle: `${caso.id} ${caso.actor ? '· ' + caso.actor : ''}`,
+                        badge: caso.prioridad || 'Media',
+                        badgeClass: caso.prioridad === 'Crítica' ? 'badge-danger' : 
+                                    caso.prioridad === 'Alta' ? 'badge-warning' : 'badge-info',
+                        id: caso.id,
+                        page: 'casos'
+                    });
                 }
             }
         });
+        
+        // Buscar en Bugs
+        appData.bugs.forEach(bug => {
+            if (!ap || bug.proyecto === ap) {
+                if (bug.id.toLowerCase().includes(q) || 
+                    (bug.titulo && bug.titulo.toLowerCase().includes(q)) ||
+                    (bug.casoRelacionado && bug.casoRelacionado.toLowerCase().includes(q))) {
+                    results.push({
+                        type: 'bugs',
+                        icon: '🐛',
+                        title: bug.titulo || bug.id,
+                        subtitle: `${bug.id} · ${bug.severidad || 'Menor'}`,
+                        badge: bug.estado || 'Abierto',
+                        badgeClass: bug.estado === 'Solucionado' ? 'badge-success' : 'badge-danger',
+                        id: bug.id,
+                        page: 'bugs'
+                    });
+                }
+            }
+        });
+        
+        // Buscar en Ejecuciones
+        appData.ejecuciones.forEach(exec => {
+            if (!ap || exec.proyecto === ap) {
+                if (exec.id.toLowerCase().includes(q) || 
+                    (exec.nombreCiclo && exec.nombreCiclo.toLowerCase().includes(q))) {
+                    let casosCount = 0;
+                    try { casosCount = JSON.parse(exec.casosAsociados || '[]').length; } catch(e) {}
+                    
+                    results.push({
+                        type: 'ejecuciones',
+                        icon: '▶️',
+                        title: exec.nombreCiclo || exec.id,
+                        subtitle: `${exec.id} · ${casosCount} casos`,
+                        badge: exec.fecha || '',
+                        badgeClass: 'badge-neutral',
+                        id: exec.id,
+                        page: 'ejecuciones'
+                    });
+                }
+            }
+        });
+        
+        // Buscar en APIs
+        appData.apis.forEach(api => {
+            if (!ap || api.proyecto === ap) {
+                if (api.id.toLowerCase().includes(q) || 
+                    (api.nombre && api.nombre.toLowerCase().includes(q)) ||
+                    (api.endpoint && api.endpoint.toLowerCase().includes(q))) {
+                    results.push({
+                        type: 'apis',
+                        icon: '🔌',
+                        title: api.nombre || api.id,
+                        subtitle: `${api.id} · ${api.metodo || 'GET'} ${api.endpoint || ''}`,
+                        badge: api.estado || 'Pendiente',
+                        badgeClass: api.estado === 'Correcta' ? 'badge-success' : 
+                                    api.estado === 'Error' ? 'badge-danger' : 'badge-warning',
+                        id: api.id,
+                        page: 'apis'
+                    });
+                }
+            }
+        });
+        
+        // Buscar en Proyectos
+        appData.proyectos.forEach(proj => {
+            if (proj.id.toLowerCase().includes(q) || 
+                (proj.nombre && proj.nombre.toLowerCase().includes(q)) ||
+                (proj.codigoCliente && proj.codigoCliente.toLowerCase().includes(q))) {
+                results.push({
+                    type: 'proyectos',
+                    icon: '',
+                    title: proj.nombre || proj.id,
+                    subtitle: `${proj.id} ${proj.codigoCliente ? '· ' + proj.codigoCliente : ''}`,
+                    badge: proj.estado || 'Planificado',
+                    badgeClass: proj.estado === 'Activo' ? 'badge-success' : 
+                                proj.estado === 'Completado' ? 'badge-info' : 'badge-warning',
+                    id: proj.id,
+                    page: 'proyectos'
+                });
+            }
+        });
+        
+        // Buscar en Objetivos
+        appData.objetivos.forEach(obj => {
+            if (!ap || obj.proyecto === ap) {
+                if (obj.id.toLowerCase().includes(q) || 
+                    (obj.objetivo && obj.objetivo.toLowerCase().includes(q))) {
+                    results.push({
+                        type: 'objetivos',
+                        icon: '🎯',
+                        title: obj.objetivo || obj.id,
+                        subtitle: `${obj.id} · ${obj.responsable || 'Sin responsable'}`,
+                        badge: obj.estado || 'Pendiente',
+                        badgeClass: obj.estado === 'Finalizado' ? 'badge-success' : 
+                                    obj.estado === 'En progreso' ? 'badge-info' : 'badge-warning',
+                        id: obj.id,
+                        page: 'objetivos'
+                    });
+                }
+            }
+        });
+        
+        return results.slice(0, 50); // Limitar a 50 resultados
+    }
+    
+    function renderCommandPaletteResults(results) {
+        const container = document.getElementById('commandPaletteResults');
+        if (!container) return;
+        
+        if (results.length === 0) {
+            container.innerHTML = `
+                <div class="command-palette-empty">
+                    <div class="command-palette-empty-icon">🔍</div>
+                    <div>No se encontraron resultados</div>
+                </div>
+            `;
+            return;
+        }
+        
+        // Agrupar por tipo
+        const grouped = {};
+        results.forEach(r => {
+            if (!grouped[r.type]) grouped[r.type] = [];
+            grouped[r.type].push(r);
+        });
+        
+        let html = '';
+        const typeLabels = {
+            'casos': { icon: '📋', label: 'Casos de Uso' },
+            'bugs': { icon: '🐛', label: 'Bugs / Defectos' },
+            'ejecuciones': { icon: '▶️', label: 'Ejecuciones' },
+            'apis': { icon: '🔌', label: 'APIs' },
+            'proyectos': { icon: '📁', label: 'Proyectos' },
+            'objetivos': { icon: '🎯', label: 'Objetivos' }
+        };
+        
+        let globalIndex = 0;
+        Object.keys(grouped).forEach(type => {
+            const label = typeLabels[type] || { icon: '📄', label: type };
+            html += `<div class="command-palette-category">
+                <div class="command-palette-category-title">
+                    <span>${label.icon}</span>
+                    <span>${label.label}</span>
+                    <span style="margin-left: auto; opacity: 0.6;">${grouped[type].length}</span>
+                </div>`;
+            
+            grouped[type].forEach(item => {
+                const isSelected = globalIndex === commandPaletteSelectedIndex;
+                html += `
+                    <div class="command-palette-item ${isSelected ? 'selected' : ''}" 
+                            data-index="${globalIndex}" 
+                            data-id="${item.id}" 
+                            data-page="${item.page}">
+                        <div class="command-palette-item-icon cp-${item.type}">${item.icon}</div>
+                        <div class="command-palette-item-content">
+                            <div class="command-palette-item-title">${highlightText(item.title, document.getElementById('commandPaletteInput').value)}</div>
+                            <div class="command-palette-item-subtitle">${highlightText(item.subtitle, document.getElementById('commandPaletteInput').value)}</div>
+                        </div>
+                        <span class="command-palette-item-badge ${item.badgeClass || 'badge-neutral'}">${item.badge}</span>
+                    </div>
+                `;
+                globalIndex++;
+            });
+            
+            html += '</div>';
+        });
+        
+        container.innerHTML = html;
+        
+        // Agregar event listeners
+        container.querySelectorAll('.command-palette-item').forEach(item => {
+            item.addEventListener('click', () => {
+                selectCommandPaletteItem(item);
+            });
+        });
+    }
+    
+    function highlightText(text, query) {
+        if (!query || query.length < 2) return text;
+        const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
+        return text.replace(regex, '<mark style="background: rgba(59, 130, 246, 0.3); color: inherit; padding: 0 2px; border-radius: 2px;">$1</mark>');
+    }
+    
+    function selectCommandPaletteItem(item) {
+        const id = item.dataset.id;
+        const page = item.dataset.page;
+        
+        closeCommandPalette();
+        
+        // Navegar a la página y abrir el elemento
+        if (page && id) {
+            navigateTo(page);
+            setTimeout(() => {
+                openModal(page, id);
+            }, 300);
+        }
+    }
+    
+    function navigateCommandPalette(direction) {
+        const items = document.querySelectorAll('.command-palette-item');
+        if (items.length === 0) return;
+        
+        items.forEach(item => item.classList.remove('selected'));
+        
+        if (direction === 'up') {
+            commandPaletteSelectedIndex = (commandPaletteSelectedIndex - 1 + items.length) % items.length;
+        } else {
+            commandPaletteSelectedIndex = (commandPaletteSelectedIndex + 1) % items.length;
+        }
+        
+        const selectedItem = items[commandPaletteSelectedIndex];
+        if (selectedItem) {
+            selectedItem.classList.add('selected');
+            selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+    }
+    
+    // Event listeners para Command Palette
+    document.addEventListener('keydown', (e) => {
+        // Ctrl+K para abrir/cerrar
+        if (e.ctrlKey && e.key === 'k') {
+            e.preventDefault();
+            toggleCommandPalette();
+        }
+        
+        // Si la palette está abierta
+        if (commandPaletteOpen) {
+            const input = document.getElementById('commandPaletteInput');
+            
+            // Escape para cerrar
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                closeCommandPalette();
+            }
+            
+            // Flechas para navegar
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                navigateCommandPalette('down');
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                navigateCommandPalette('up');
+            }
+            
+            // Enter para seleccionar
+            if (e.key === 'Enter' && input) {
+                e.preventDefault();
+                const selectedItem = document.querySelector('.command-palette-item.selected');
+                if (selectedItem) {
+                    selectCommandPaletteItem(selectedItem);
+                }
+            }
+            
+            // Búsqueda en tiempo real
+            if (input && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
+                setTimeout(() => {
+                    const query = input.value;
+                    commandPaletteResults = searchGlobal(query);
+                    commandPaletteSelectedIndex = 0;
+                    renderCommandPaletteResults(commandPaletteResults);
+                }, 10);
+            }
+        }
+    });
+    
+    // Input handler para búsqueda en tiempo real
+    document.addEventListener('input', (e) => {
+        if (commandPaletteOpen && e.target.id === 'commandPaletteInput') {
+            const query = e.target.value;
+            commandPaletteResults = searchGlobal(query);
+            commandPaletteSelectedIndex = 0;
+            renderCommandPaletteResults(commandPaletteResults);
+        }
+    });
 
-        // Crear datos base si no existen usuarios - CORREGIDO
+    // ============ INIT ============
+    async function init() {
+        // 1. Cargar datos desde Firebase
+        await loadData();
+        
+        // 2. Suscribirse a cambios en tiempo real (UNA SOLA VEZ)
+        suscribirseAlTiempoReal();
+        
+        // 3. Crear datos base si no existen usuarios
         if (!appData.usuarios || appData.usuarios.length === 0) {
             appData.usuarios = [{ id: 1, nombre: 'Admin Sistema', usuario: 'admin', password: 'password', rol: 'Admin' }];
             appData.proyectos = appData.proyectos || [];
@@ -2103,17 +2670,28 @@ Estado obtenido: ${status}</textarea>
             appData.capturas = appData.capturas || [];
             appData.apis = appData.apis || [];
             appData.mejoras = appData.mejoras || [];
-            saveData();
+            appData.ejecuciones = appData.ejecuciones || [];
+            appData.registroDiario = appData.registroDiario || [];
+            appData.trazabilidad = appData.trazabilidad || [];
+            appData.comentarios = appData.comentarios || [];
+            appData.notificaciones = [];
+            appData.configuracion = appData.configuracion || { theme: 'dark', activeProject: '' };
+            
+            await saveData();
+            console.log("✅ Datos base creados");
         }
-
+        
+        // 4. Restaurar sesión
         if (!restoreSession()) {
             document.getElementById('authScreen').style.display = 'flex';
             document.getElementById('appScreen').style.display = 'none';
         }
-
+        
+        // 5. Event listener para login con Enter
         const loginPassInput = document.getElementById('loginPass');
         if (loginPassInput) loginPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-
+        
+        // 6. Asegurar que todos los usuarios tengan proyectosAutorizados
         if (appData.usuarios && appData.usuarios.length > 0) {
             let changed = false;
             appData.usuarios.forEach(u => {
@@ -2122,23 +2700,23 @@ Estado obtenido: ${status}</textarea>
                     changed = true;
                 }
             });
-            if (changed) saveData();
+            if (changed) await saveData();
         }
-
+        
+        // 7. Asegurar que todos los registros tengan creadoPor
         const dataArrays = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'registroDiario'];
         let needsSave = false;
         dataArrays.forEach(key => {
             if (appData[key] && Array.isArray(appData[key])) {
                 appData[key].forEach(item => {
                     if (!item.creadoPor) {
-                        item.creadoPor = 1; // Asignar al Admin (id: 1)
+                        item.creadoPor = 1;
                         needsSave = true;
                     }
                 });
             }
         });
-        if (needsSave) saveData();
-
+        if (needsSave) await saveData();
     }
 
 
