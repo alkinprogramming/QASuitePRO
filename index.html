@@ -129,6 +129,26 @@
         <div id="toastContainer"></div>
         <div id="notificationsPanel" class="notifications-panel"></div>
 
+        <!-- Command Palette Global -->
+        <div id="commandPalette" class="command-palette-overlay" style="display: none;">
+            <div class="command-palette">
+                <div class="command-palette-header">
+                    <span class="command-palette-icon">🔍</span>
+                    <input type="text" id="commandPaletteInput" class="command-palette-input" placeholder="Buscar en casos, bugs, APIs, ejecuciones...">
+                    <kbd class="command-palette-shortcut">ESC</kbd>
+                </div>
+                <div id="commandPaletteResults" class="command-palette-results">
+                    <div class="command-palette-hint">
+                        <span>💡 Escribe para buscar en todos los módulos</span>
+                    </div>
+                </div>
+                <div class="command-palette-footer">
+                    <span class="command-palette-footer-item"><kbd>↑↓</kbd> Navegar</span>
+                    <span class="command-palette-footer-item"><kbd></kbd> Seleccionar</span>
+                    <span class="command-palette-footer-item"><kbd>ESC</kbd> Cerrar</span>
+                </div>
+            </div>
+        </div>
         <!-- <script src="script.js"></script> -->
         <script src="app.js"></script>
     </body>
