@@ -1909,30 +1909,92 @@ ${renderDonutChart('Severidad Bugs', [
 
 
     function renderInformes() {
-        return `<h1 class="page-title">📄 Informes de Seguimiento</h1>
-        <p class="page-subtitle">Genera informes profesionales en formato Word con métricas y gráficos</p>
+        const ejecuciones = filterByProject(appData.ejecuciones);
+        const casos = filterByProject(appData.casos);
+        const bugs = filterByProject(appData.bugs);
+        const apis = filterByProject(appData.apis);
+        
+        let html = `<h1 class="page-title"> Informes y Exportación</h1>
+        <p class="page-subtitle">Genera informes profesionales y exporta datos en diferentes formatos</p>
+        
         <div class="chart-grid">
-        <div class="chart-card">
-        <div class="chart-title">📊 Informe Ejecutivo</div>
-        <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
-        Incluye resumen ejecutivo, métricas clave, casos de uso, defectos y ejecuciones.
-        </p>
-        <button class="btn btn-accent" data-action="downloadDocx">📥 Descargar Informe .docx</button>
+            <!-- Informe Ejecutivo Completo -->
+            <div class="chart-card">
+                <div class="chart-title">📊 Informe Ejecutivo Completo</div>
+                <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
+                    Informe completo en Word con todos los módulos: casos, bugs, ejecuciones y APIs.
+                </p>
+                <button class="btn btn-accent" onclick="downloadDocx()">📥 Descargar Informe .docx</button>
+            </div>
+            
+            <!-- Exportar Casos a Excel -->
+            <div class="chart-card">
+                <div class="chart-title">📋 Exportar Casos de Prueba</div>
+                <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
+                    Exporta todos los casos de uso del proyecto activo a formato Excel (.xlsx).
+                </p>
+                <button class="btn btn-accent" onclick="exportCasosToExcel()"> Exportar Casos .xlsx</button>
+            </div>
+            
+            <!-- Informe de Ejecuciones y Bugs -->
+            <div class="chart-card">
+                <div class="chart-title"> Informe Ejecuciones y Bugs</div>
+                <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
+                    Informe detallado de ciclos de prueba y defectos detectados en formato Word.
+                </p>
+                <button class="btn btn-accent" onclick="downloadEjecucionesBugsDoc()">📥 Descargar Informe .doc</button>
+            </div>
+            
+            <!-- Informe de APIs -->
+            <div class="chart-card">
+                <div class="chart-title">🔌 Informe Gestión APIs</div>
+                <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
+                    Informe completo de endpoints, métodos y estados de las APIs evaluadas.
+                </p>
+                <button class="btn btn-accent" onclick="downloadApisDoc()">📥 Descargar Informe .doc</button>
+            </div>
+            
+            <!-- Comparativa de Ejecuciones -->
+            <div class="chart-card" style="grid-column: span 2;">
+                <div class="chart-title"> Comparativa de Ejecuciones</div>
+                <p style="color:var(--text2); margin-bottom:16px; font-size:0.9rem;">
+                    Compara dos ciclos de prueba para ver diferencias en resultados y cobertura.
+                </p>
+                <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                    <select id="compExec1" style="flex:1; min-width:200px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--input); color:var(--text);">
+                        <option value="">Seleccionar Ejecución 1...</option>
+                        ${ejecuciones.map(e => `<option value="${e.id}">${e.id} - ${e.nombreCiclo}</option>`).join('')}
+                    </select>
+                    <span style="font-size:1.2rem; font-weight:bold;">VS</span>
+                    <select id="compExec2" style="flex:1; min-width:200px; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--input); color:var(--text);">
+                        <option value="">Seleccionar Ejecución 2...</option>
+                        ${ejecuciones.map(e => `<option value="${e.id}">${e.id} - ${e.nombreCiclo}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-accent" onclick="compararEjecuciones()">🔍 Comparar</button>
+                </div>
+                <div id="comparativaResult" style="margin-top:20px;"></div>
+            </div>
         </div>
-        <div class="chart-card">
-        <div class="chart-title">📋 Contenido del Informe</div>
-        <ul style="list-style:none; display:flex; flex-direction:column; gap:8px;">
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Portada profesional</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Resumen ejecutivo</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Métricas y KPIs</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Detalle de casos de uso</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Registro de defectos</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Ejecuciones de pruebas</li>
-        <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Conclusiones</li>
-        </ul>
-        </div>
+        
+        <div class="chart-grid" style="margin-top:20px;">
+            <div class="chart-card">
+                <div class="chart-title">📋 Contenido del Informe Ejecutivo</div>
+                <ul style="list-style:none; display:flex; flex-direction:column; gap:8px;">
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Portada profesional</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Resumen ejecutivo</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Métricas y KPIs</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Detalle de casos de uso</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Registro de defectos</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Ejecuciones de pruebas</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Gestión de APIs</li>
+                    <li style="padding:8px 12px; background:var(--card-alt); border-radius:8px; font-size:0.85rem;">✅ Conclusiones</li>
+                </ul>
+            </div>
         </div>`;
+        
+        return html;
     }
+
     function renderAjustes() {
         return `<h1 class="page-title">⚙️ Ajustes</h1>
         <div class="chart-grid">
@@ -1961,7 +2023,7 @@ ${renderDonutChart('Severidad Bugs', [
         </div>`;
     }
     // ============ INFORME DOCX PROFESIONAL ============
-    function downloadDocx() {
+    window.downloadDocx = function() {
         const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
         const casos = filterByProject(appData.casos);
         const bugs = filterByProject(appData.bugs);
@@ -2651,6 +2713,453 @@ ${renderDonutChart('Severidad Bugs', [
             renderCommandPaletteResults(commandPaletteResults);
         }
     });
+
+    // ============ EXPORTAR CASOS A EXCEL ============
+    window.exportCasosToExcel = function() {
+        const casos = filterByProject(appData.casos);
+        const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
+        
+        if (casos.length === 0) {
+            return toast('No hay casos de prueba para exportar', 'warning');
+        }
+        
+        // Preparar datos para Excel
+        const data = casos.map(c => ({
+            'ID': c.id,
+            'Título': c.titulo || '',
+            'Prioridad': c.prioridad || 'Media',
+            'Actor': c.actor || '',
+            'Descripción': c.descripcion || '',
+            'Flujo de Pasos': c.flujo || '',
+            'Input Cliente': c.inputCliente || '',
+            'Criterios BDD': c.criterios || '',
+            'Resultado Esperado': c.resultadoEsperado || '',
+            'Estado': c.estado || 'Pendiente',
+            'Proyecto': c.proyecto || '',
+            'Creado Por': c.creadoPor ? (appData.usuarios.find(u => u.id === c.creadoPor)?.nombre || 'Admin') : 'Admin'
+        }));
+        
+        // Crear workbook
+        const wb = XLSX.utils.book_new();
+        const ws = XLSX.utils.json_to_sheet(data);
+        
+        // Ajustar anchos de columna
+        ws['!cols'] = [
+            { wch: 15 }, { wch: 40 }, { wch: 12 }, { wch: 20 },
+            { wch: 50 }, { wch: 50 }, { wch: 30 }, { wch: 50 },
+            { wch: 50 }, { wch: 15 }, { wch: 20 }, { wch: 20 }
+        ];
+        
+        XLSX.utils.book_append_sheet(wb, ws, 'Casos de Prueba');
+        
+        // Descargar
+        const fileName = `Casos_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.xlsx`;
+        XLSX.writeFile(wb, fileName);
+        
+        toast('📥 Casos exportados a Excel', 'success');
+        addNotification('📊 Exportación', `Se exportaron ${casos.length} casos a Excel`);
+    };
+
+    // ============ INFORME DE EJECUCIONES Y BUGS ============
+    window.downloadEjecucionesBugsDoc = function() {
+        const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
+        const ejecuciones = filterByProject(appData.ejecuciones);
+        const bugs = filterByProject(appData.bugs);
+        const casos = filterByProject(appData.casos);
+        
+        const bugsAbiertos = bugs.filter(b => b.estado !== 'Solucionado').length;
+        const bugsSolucionados = bugs.filter(b => b.estado === 'Solucionado').length;
+        
+        let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta charset="UTF-8"><title>Informe Ejecuciones y Bugs</title>
+        <style>
+            @page { size: A4; margin: 2cm; }
+            body { font-family: 'Calibri', Arial, sans-serif; color: #1e293b; line-height: 1.6; }
+            .cover { text-align: center; padding: 80px 40px; border-bottom: 4px solid #ef4444; margin-bottom: 40px; }
+            .cover-logo { font-size: 72px; margin-bottom: 20px; }
+            .cover h1 { font-size: 36px; color: #0f172a; margin: 10px 0; font-weight: 700; }
+            .cover h2 { font-size: 20px; color: #64748b; font-weight: 400; margin: 8px 0; }
+            .cover-meta { margin-top: 40px; font-size: 14px; color: #64748b; }
+            .cover-meta div { margin: 6px 0; }
+            h1.section { color: #0f172a; font-size: 24px; border-bottom: 2px solid #ef4444; padding-bottom: 8px; margin-top: 40px; }
+            h2 { color: #1e40af; font-size: 18px; margin-top: 24px; }
+            p { font-size: 12px; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 11px; }
+            th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-weight: 600; }
+            td { border: 1px solid #e2e8f0; padding: 8px; }
+            tr:nth-child(even) td { background: #f8fafc; }
+            .badge { padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; display: inline-block; }
+            .passed { background: #d1fae5; color: #065f46; }
+            .failed { background: #fee2e2; color: #991b1b; }
+            .pending { background: #fef3c7; color: #92400e; }
+            .abierto { background: #fee2e2; color: #991b1b; }
+            .solucionado { background: #d1fae5; color: #065f46; }
+            .kpi-box { display: inline-block; padding: 16px 24px; margin: 8px; background: #f1f5f9; border-radius: 8px; border-left: 4px solid #ef4444; min-width: 140px; }
+            .kpi-value { font-size: 28px; font-weight: 700; color: #0f172a; }
+            .kpi-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+            .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; text-align: center; }
+        </style></head>
+        <body>
+        <div class="cover">
+            <div class="cover-logo">🐛</div>
+            <h1>Informe de Ejecuciones y Defectos</h1>
+            <h2>Quality Assurance - Test Results & Bug Tracking</h2>
+            <div class="cover-meta">
+            <div><strong>Proyecto:</strong> ${proyecto?.nombre || 'Todos los proyectos'}</div>
+            <div><strong>Cliente:</strong> ${proyecto?.codigoCliente || 'N/A'}</div>
+            <div><strong>Responsable QA:</strong> ${proyecto?.responsable || currentUser?.nombre || 'N/A'}</div>
+            <div><strong>Fecha de emisión:</strong> ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+            <div><strong>Versión:</strong> 1.0</div>
+            </div>
+        </div>
+        
+        <h1 class="section">1. Resumen Ejecutivo</h1>
+        <p>Este informe detalla los resultados de las ejecuciones de pruebas y los defectos identificados durante el proceso de aseguramiento de calidad del proyecto <strong>${proyecto?.nombre || 'en curso'}</strong>.</p>
+        
+        <div class="summary-grid">
+            <div class="kpi-box">
+            <div class="kpi-value">${ejecuciones.length}</div>
+            <div class="kpi-label">Ciclos de Prueba</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${bugs.length}</div>
+            <div class="kpi-label">Total Defectos</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${bugsAbiertos}</div>
+            <div class="kpi-label">Bugs Abiertos</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${bugsSolucionados}</div>
+            <div class="kpi-label">Bugs Solucionados</div>
+            </div>
+        </div>
+        
+        <h1 class="section">2. Ciclos de Ejecución</h1>
+        <p>Se han realizado <strong>${ejecuciones.length}</strong> ciclos de ejecución de pruebas.</p>
+        <table>
+            <tr><th>ID</th><th>Ciclo</th><th>Fecha</th><th>Responsable</th><th>Casos</th></tr>
+            ${ejecuciones.map(e => {
+                let casosCount = 0;
+                try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
+                return `<tr>
+                    <td>${e.id}</td>
+                    <td>${e.nombreCiclo || ''}</td>
+                    <td>${e.fecha || '-'}</td>
+                    <td>${e.responsable || '-'}</td>
+                    <td>${casosCount}</td>
+                </tr>`;
+            }).join('')}
+        </table>
+        
+        <h1 class="section">3. Defectos Detectados</h1>
+        <p>Se han registrado <strong>${bugs.length}</strong> defectos durante las pruebas. De estos, <strong>${bugsSolucionados}</strong> han sido resueltos y <strong>${bugsAbiertos}</strong> permanecen abiertos.</p>
+        <table>
+            <tr><th>ID</th><th>Título</th><th>Severidad</th><th>Caso</th><th>Estado</th></tr>
+            ${bugs.map(b => `<tr>
+            <td>${b.id}</td>
+            <td>${b.titulo || ''}</td>
+            <td>${b.severidad || 'Menor'}</td>
+            <td>${b.casoRelacionado || '-'}</td>
+            <td><span class="badge ${b.estado === 'Solucionado' ? 'solucionado' : 'abierto'}">${b.estado || 'Abierto'}</span></td>
+            </tr>`).join('')}
+        </table>
+        
+        <h1 class="section">4. Análisis de Severidad</h1>
+        <table>
+            <tr><th>Severidad</th><th>Cantidad</th><th>Porcentaje</th></tr>
+            ${['Bloqueante', 'Crítica', 'Mayor', 'Menor'].map(sev => {
+                const count = bugs.filter(b => b.severidad === sev).length;
+                const pct = bugs.length > 0 ? Math.round((count / bugs.length) * 100) : 0;
+                return `<tr><td>${sev}</td><td>${count}</td><td>${pct}%</td></tr>`;
+            }).join('')}
+        </table>
+        
+        <div class="footer">
+            <p>Informe generado por QA Suite PRO · ${new Date().toLocaleString('es-ES')}</p>
+            <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
+        </div>
+        </body></html>`;
+        
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Informe_Ejecuciones_Bugs_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast('📄 Informe de Ejecuciones y Bugs descargado', 'success');
+        addNotification(' Informe generado', 'Se ha descargado el informe de ejecuciones y bugs');
+    };
+
+    // ============ INFORME DE APIs ============
+    window.downloadApisDoc = function() {
+        const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
+        const apis = filterByProject(appData.apis);
+        
+        const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
+        const apisError = apis.filter(a => a.estado === 'Error').length;
+        const apisPendientes = apis.filter(a => a.estado === 'Pendiente').length;
+        
+        let html = `
+        <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+        <head><meta charset="UTF-8"><title>Informe Gestión APIs</title>
+        <style>
+            @page { size: A4; margin: 2cm; }
+            body { font-family: 'Calibri', Arial, sans-serif; color: #1e293b; line-height: 1.6; }
+            .cover { text-align: center; padding: 80px 40px; border-bottom: 4px solid #14b8a6; margin-bottom: 40px; }
+            .cover-logo { font-size: 72px; margin-bottom: 20px; }
+            .cover h1 { font-size: 36px; color: #0f172a; margin: 10px 0; font-weight: 700; }
+            .cover h2 { font-size: 20px; color: #64748b; font-weight: 400; margin: 8px 0; }
+            .cover-meta { margin-top: 40px; font-size: 14px; color: #64748b; }
+            .cover-meta div { margin: 6px 0; }
+            h1.section { color: #0f172a; font-size: 24px; border-bottom: 2px solid #14b8a6; padding-bottom: 8px; margin-top: 40px; }
+            h2 { color: #1e40af; font-size: 18px; margin-top: 24px; }
+            p { font-size: 12px; margin: 8px 0; }
+            table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 11px; }
+            th { background: #1e293b; color: white; padding: 10px 8px; text-align: left; font-weight: 600; }
+            td { border: 1px solid #e2e8f0; padding: 8px; }
+            tr:nth-child(even) td { background: #f8fafc; }
+            .badge { padding: 3px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; display: inline-block; }
+            .passed { background: #d1fae5; color: #065f46; }
+            .failed { background: #fee2e2; color: #991b1b; }
+            .pending { background: #fef3c7; color: #92400e; }
+            .kpi-box { display: inline-block; padding: 16px 24px; margin: 8px; background: #f1f5f9; border-radius: 8px; border-left: 4px solid #14b8a6; min-width: 140px; }
+            .kpi-value { font-size: 28px; font-weight: 700; color: #0f172a; }
+            .kpi-label { font-size: 11px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
+            .summary-grid { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+            .footer { margin-top: 60px; padding-top: 20px; border-top: 1px solid #e2e8f0; font-size: 10px; color: #94a3b8; text-align: center; }
+        </style></head>
+        <body>
+        <div class="cover">
+            <div class="cover-logo">🔌</div>
+            <h1>Informe de Gestión de APIs</h1>
+            <h2>API Testing & Validation Report</h2>
+            <div class="cover-meta">
+            <div><strong>Proyecto:</strong> ${proyecto?.nombre || 'Todos los proyectos'}</div>
+            <div><strong>Cliente:</strong> ${proyecto?.codigoCliente || 'N/A'}</div>
+            <div><strong>Responsable QA:</strong> ${proyecto?.responsable || currentUser?.nombre || 'N/A'}</div>
+            <div><strong>Fecha de emisión:</strong> ${new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' })}</div>
+            <div><strong>Versión:</strong> 1.0</div>
+            </div>
+        </div>
+        
+        <h1 class="section">1. Resumen Ejecutivo</h1>
+        <p>Este informe detalla el estado de las APIs evaluadas durante el proceso de aseguramiento de calidad del proyecto <strong>${proyecto?.nombre || 'en curso'}</strong>.</p>
+        
+        <div class="summary-grid">
+            <div class="kpi-box">
+            <div class="kpi-value">${apis.length}</div>
+            <div class="kpi-label">Total APIs</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${apisCorrectas}</div>
+            <div class="kpi-label">APIs Correctas</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${apisError}</div>
+            <div class="kpi-label">APIs con Error</div>
+            </div>
+            <div class="kpi-box">
+            <div class="kpi-value">${apisPendientes}</div>
+            <div class="kpi-label">APIs Pendientes</div>
+            </div>
+        </div>
+        
+        <h1 class="section">2. Detalle de APIs</h1>
+        <table>
+            <tr><th>ID API</th><th>Nombre</th><th>Método</th><th>Endpoint</th><th>Estado</th></tr>
+            ${apis.map(a => `<tr>
+            <td>${a.id}</td>
+            <td>${a.nombre || ''}</td>
+            <td><strong>${a.metodo || 'GET'}</strong></td>
+            <td>${a.endpoint || '-'}</td>
+            <td><span class="badge ${a.estado === 'Correcta' ? 'passed' : a.estado === 'Error' ? 'failed' : 'pending'}">${a.estado || 'Pendiente'}</span></td>
+            </tr>`).join('')}
+        </table>
+        
+        <h1 class="section">3. Análisis por Método</h1>
+        <table>
+            <tr><th>Método HTTP</th><th>Cantidad</th><th>Porcentaje</th></tr>
+            ${['GET', 'POST', 'PUT', 'DELETE'].map(method => {
+                const count = apis.filter(a => a.metodo === method).length;
+                const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
+                return `<tr><td>${method}</td><td>${count}</td><td>${pct}%</td></tr>`;
+            }).join('')}
+        </table>
+        
+        <h1 class="section">4. Análisis por Estado</h1>
+        <table>
+            <tr><th>Estado</th><th>Cantidad</th><th>Porcentaje</th></tr>
+            ${['Correcta', 'Error', 'Pendiente'].map(status => {
+                const count = apis.filter(a => a.estado === status).length;
+                const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
+                return `<tr><td>${status}</td><td>${count}</td><td>${pct}%</td></tr>`;
+            }).join('')}
+        </table>
+        
+        <div class="footer">
+            <p>Informe generado por QA Suite PRO · ${new Date().toLocaleString('es-ES')}</p>
+            <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
+        </div>
+        </body></html>`;
+        
+        const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `Informe_APIs_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+        toast(' Informe de APIs descargado', 'success');
+        addNotification('📊 Informe generado', 'Se ha descargado el informe de APIs');
+    };
+
+    // ============ COMPARATIVA DE EJECUCIONES ============
+    window.compararEjecuciones = function() {
+        const exec1Id = document.getElementById('compExec1').value;
+        const exec2Id = document.getElementById('compExec2').value;
+        const resultDiv = document.getElementById('comparativaResult');
+        
+        if (!exec1Id || !exec2Id) {
+            return toast('Selecciona dos ejecuciones para comparar', 'warning');
+        }
+        
+        if (exec1Id === exec2Id) {
+            return toast('Selecciona dos ejecuciones diferentes', 'warning');
+        }
+        
+        const exec1 = appData.ejecuciones.find(e => e.id === exec1Id);
+        const exec2 = appData.ejecuciones.find(e => e.id === exec2Id);
+        
+        if (!exec1 || !exec2) {
+            return toast('Ejecuciones no encontradas', 'error');
+        }
+        
+        // Parsear casos asociados
+        let casos1 = [];
+        let casos2 = [];
+        try { casos1 = JSON.parse(exec1.casosAsociados || '[]'); } catch (e) { }
+        try { casos2 = JSON.parse(exec2.casosAsociados || '[]'); } catch (e) { }
+        
+        // Calcular estadísticas
+        const stats1 = {
+            Passed: casos1.filter(c => c.status === 'Passed').length,
+            Failed: casos1.filter(c => c.status === 'Failed').length,
+            'In Progress': casos1.filter(c => c.status === 'In Progress').length,
+            Blocked: casos1.filter(c => c.status === 'Blocked').length,
+            Pendiente: casos1.filter(c => c.status === 'Pendiente' || !c.status).length,
+            Total: casos1.length
+        };
+        
+        const stats2 = {
+            Passed: casos2.filter(c => c.status === 'Passed').length,
+            Failed: casos2.filter(c => c.status === 'Failed').length,
+            'In Progress': casos2.filter(c => c.status === 'In Progress').length,
+            Blocked: casos2.filter(c => c.status === 'Blocked').length,
+            Pendiente: casos2.filter(c => c.status === 'Pendiente' || !c.status).length,
+            Total: casos2.length
+        };
+        
+        const pct1 = stats1.Total > 0 ? Math.round((stats1.Passed / stats1.Total) * 100) : 0;
+        const pct2 = stats2.Total > 0 ? Math.round((stats2.Passed / stats2.Total) * 100) : 0;
+        
+        // Casos únicos en cada ejecución
+        const casos1Ids = new Set(casos1.map(c => c.id));
+        const casos2Ids = new Set(casos2.map(c => c.id));
+        const soloEn1 = [...casos1Ids].filter(id => !casos2Ids.has(id));
+        const soloEn2 = [...casos2Ids].filter(id => !casos1Ids.has(id));
+        const enAmbas = [...casos1Ids].filter(id => casos2Ids.has(id));
+        
+        // Comparar estados de casos en ambas ejecuciones
+        const cambios = [];
+        enAmbas.forEach(casoId => {
+            const caso1 = casos1.find(c => c.id === casoId);
+            const caso2 = casos2.find(c => c.id === casoId);
+            if (caso1.status !== caso2.status) {
+                cambios.push({
+                    id: casoId,
+                    titulo: appData.casos.find(c => c.id === casoId)?.titulo || 'Caso eliminado',
+                    status1: caso1.status || 'Pendiente',
+                    status2: caso2.status || 'Pendiente'
+                });
+            }
+        });
+        
+        let html = `
+        <div style="background:var(--card-alt); padding:20px; border-radius:12px; border:1px solid var(--border);">
+            <h3 style="margin-top:0; color:var(--accent);">📊 Comparativa: ${exec1.nombreCiclo} vs ${exec2.nombreCiclo}</h3>
+            
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:20px; margin-bottom:20px;">
+                <div style="padding:15px; background:var(--bg); border-radius:8px; border-left:4px solid var(--accent);">
+                    <div style="font-weight:700; margin-bottom:10px;">${exec1.nombreCiclo}</div>
+                    <div style="font-size:0.85rem; color:var(--text2);"> ${exec1.fecha || 'Sin fecha'}</div>
+                    <div style="font-size:0.85rem; color:var(--text2);">📋 ${casos1.length} casos</div>
+                    <div style="font-size:1.2rem; font-weight:700; color:var(--success); margin-top:10px;">${pct1}% aprobados</div>
+                </div>
+                <div style="padding:15px; background:var(--bg); border-radius:8px; border-left:4px solid var(--accent2);">
+                    <div style="font-weight:700; margin-bottom:10px;">${exec2.nombreCiclo}</div>
+                    <div style="font-size:0.85rem; color:var(--text2);">📅 ${exec2.fecha || 'Sin fecha'}</div>
+                    <div style="font-size:0.85rem; color:var(--text2);"> ${casos2.length} casos</div>
+                    <div style="font-size:1.2rem; font-weight:700; color:var(--success); margin-top:10px;">${pct2}% aprobados</div>
+                </div>
+            </div>
+            
+            <h4 style="margin:15px 0 10px; color:var(--text);">📈 Estadísticas Comparadas</h4>
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                <thead>
+                    <tr style="background:var(--bg);">
+                        <th style="padding:10px; text-align:left; border-bottom:1px solid var(--border);">Estado</th>
+                        <th style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${exec1.nombreCiclo}</th>
+                        <th style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${exec2.nombreCiclo}</th>
+                        <th style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">Diferencia</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${['Passed', 'Failed', 'In Progress', 'Blocked', 'Pendiente'].map(status => {
+                        const diff = stats2[status] - stats1[status];
+                        const diffColor = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text2)';
+                        return `
+                        <tr>
+                            <td style="padding:10px; border-bottom:1px solid var(--border);">${status}</td>
+                            <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${stats1[status]}</td>
+                            <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${stats2[status]}</td>
+                            <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border); color:${diffColor}; font-weight:700;">${diff > 0 ? '+' : ''}${diff}</td>
+                        </tr>`;
+                    }).join('')}
+                </tbody>
+            </table>
+            
+            ${cambios.length > 0 ? `
+            <h4 style="margin:20px 0 10px; color:var(--text);">🔄 Cambios de Estado (${cambios.length})</h4>
+            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
+                <thead>
+                    <tr style="background:var(--bg);">
+                        <th style="padding:10px; text-align:left; border-bottom:1px solid var(--border);">Caso</th>
+                        <th style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">Estado Anterior</th>
+                        <th style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">Estado Nuevo</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${cambios.map(c => `
+                    <tr>
+                        <td style="padding:10px; border-bottom:1px solid var(--border);"><code>${c.id}</code> - ${c.titulo}</td>
+                        <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${c.status1}</td>
+                        <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${c.status2}</td>
+                    </tr>`).join('')}
+                </tbody>
+            </table>
+            ` : '<p style="color:var(--text2); margin-top:15px;">✅ No hay cambios de estado entre las ejecuciones</p>'}
+            
+            ${soloEn1.length > 0 ? `<p style="color:var(--warning); margin-top:15px;">⚠️ ${soloEn1.length} caso(s) solo en ${exec1.nombreCiclo}</p>` : ''}
+            ${soloEn2.length > 0 ? `<p style="color:var(--warning); margin-top:15px;">⚠️ ${soloEn2.length} caso(s) solo en ${exec2.nombreCiclo}</p>` : ''}
+        </div>`;
+        
+        resultDiv.innerHTML = html;
+        toast('📊 Comparativa generada', 'success');
+    };
+
+
 
     // ============ INIT ============
     async function init() {
