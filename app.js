@@ -3611,18 +3611,31 @@ ${renderDonutChart('Severidad Bugs', [
         }
     });
 
+    console.log('XLSX cargado:', typeof XLSX);
+    console.log('Versión:', XLSX ? XLSX.version : 'No disponible');
+
     // ============ EXPORTAR CASOS A EXCEL ============
     window.exportCasosToExcel = function() {
-        const casos = filterByProject(appData.casos);
-        const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
-        
-        if (casos.length === 0) {
-            return toast('No hay casos de prueba para exportar', 'warning');
+        // Verificar si XLSX está disponible
+        if (typeof XLSX === 'undefined') {
+            return toast('❌ Error: Librería Excel no cargada. Recarga la página.', 'error');
         }
-        
-        // Preparar datos para Excel
+
+        // 1. Obtener casos respetando permisos y proyecto activo
+        let casos = filterByProject(appData.casos);
+        const ap = getActiveProject();
+        const proyecto = ap ? appData.proyectos.find(p => p.id === ap) : null;
+
+        // 2. Validación explícita
+        if (!casos || casos.length === 0) {
+            return toast(ap ? '⚠️ No hay casos para el proyecto seleccionado' : '⚠️ Selecciona un proyecto activo o no hay casos registrados', 'warning');
+        }
+
+        console.log(`📦 Preparando exportación de ${casos.length} casos...`);
+
+        // 3. Mapeo seguro de datos (evita undefined y añade todos los campos)
         const data = casos.map(c => ({
-            'ID': c.id,
+            'ID': c.id || '',
             'Requisito': c.requisito || '',
             'Título': c.titulo || '',
             'Prioridad': c.prioridad || 'Media',
@@ -3634,28 +3647,28 @@ ${renderDonutChart('Severidad Bugs', [
             'Resultado Esperado': c.resultadoEsperado || '',
             'Estado': c.estado || 'Pendiente',
             'Proyecto': c.proyecto || '',
-            'Creado Por': c.creadoPor ? (appData.usuarios.find(u => u.id === c.creadoPor)?.nombre || 'Admin') : 'Admin'
+            'Creado Por': c.creadoPor ? (appData.usuarios.find(u => u.id === c.creadoPor)?.nombre || 'Sistema') : 'Sistema'
         }));
-        
-        // Crear workbook
+
+        // 4. Generación del Excel con SheetJS
         const wb = XLSX.utils.book_new();
         const ws = XLSX.utils.json_to_sheet(data);
-        
-        // Ajustar anchos de columna
+
+        // Ancho de columnas optimizado
         ws['!cols'] = [
-            { wch: 15 }, { wch: 40 }, { wch: 12 }, { wch: 20 },
-            { wch: 50 }, { wch: 50 }, { wch: 30 }, { wch: 50 },
-            { wch: 50 }, { wch: 15 }, { wch: 20 }, { wch: 20 }
+            { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 12 }, { wch: 20 },
+            { wch: 50 }, { wch: 50 }, { wch: 30 }, { wch: 50 }, { wch: 50 },
+            { wch: 15 }, { wch: 20 }, { wch: 20 }
         ];
-        
+
         XLSX.utils.book_append_sheet(wb, ws, 'Casos de Prueba');
-        
-        // Descargar
+
+        // 5. Descarga automática
         const fileName = `Casos_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.xlsx`;
         XLSX.writeFile(wb, fileName);
-        
-        toast('📥 Casos exportados a Excel', 'success');
-        addNotification('📊 Exportación', `Se exportaron ${casos.length} casos a Excel`);
+
+        toast(`📥 ${data.length} casos exportados correctamente`, 'success');
+        addNotification('📊 Exportación', `Se exportaron ${data.length} casos a Excel`);
     };
 
     // ============ INFORME DE EJECUCIONES Y BUGS ============
