@@ -17,7 +17,7 @@
     let activeSubscriptions = {};
 
     const projectRequiredPages = ['casos', 'bugs', 'ejecuciones', 'diario', 'capturas', 'apis', 'trazabilidad', 'informes', 'historico', 'mejoras', 'objetivos'];
-    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario', 'manual', 'requisitos'];
+    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario', 'manual', 'requisitos', 'mejoras', 'Dashboard', 'objetivos'];
 
     const cache = {
         data: {},
@@ -280,19 +280,20 @@
         const menuItems = [
             {
                 section: 'Principal', items: [
-                    { page: 'dashboard', icon: '📊', label: 'Dashboard', iconClass: 'icon-dashboard' },
                     { page: 'proyectos', icon: '📁', label: 'Proyectos', iconClass: 'icon-proyectos' },
-                    { page: 'objetivos', icon: '🎯', label: 'Objetivos', iconClass: 'icon-objetivos' },
-                    { page: 'mejoras', icon: '💡', label: 'Propuestas', iconClass: 'icon-mejoras' },
+                    { page: 'informes', icon: '📄', label: 'Informes', iconClass: 'icon-informes' },
                     { page: 'usuarios', icon: '👥', label: 'Usuarios', iconClass: 'icon-usuarios' }
                 ], adminOnly: true
             },
             {
                 section: 'QA Técnico', items: [
+                    { page: 'dashboard', icon: '📊', label: 'Dashboard', iconClass: 'icon-dashboard' },
                     { page: 'casos', icon: '📋', label: 'Casos de Uso', iconClass: 'icon-casos' },
                     { page: 'bugs', icon: '🐛', label: 'Defectos', iconClass: 'icon-bugs' },
                     { page: 'ejecuciones', icon: '▶️', label: 'Ejecuciones', iconClass: 'icon-ejecuciones' },
-                    { page: 'requisitos', icon: '📑', label: 'Requisitos', iconClass: 'icon-requisitos' }
+                    { page: 'requisitos', icon: '📑', label: 'Requisitos', iconClass: 'icon-requisitos' },
+                    { page: 'mejoras', icon: '💡', label: 'Propuestas', iconClass: 'icon-mejoras' },
+                    { page: 'objetivos', icon: '🎯', label: 'Objetivos', iconClass: 'icon-objetivos' },
                 ]
             },
             {
@@ -305,7 +306,6 @@
             {
                 section: 'Seguimiento', items: [
                     { page: 'trazabilidad', icon: '🔍', label: 'Trazabilidad', iconClass: 'icon-trazabilidad' },
-                    { page: 'informes', icon: '📄', label: 'Informes', iconClass: 'icon-informes' },
                     { page: 'historico', icon: '📦', label: 'Histórico', iconClass: 'icon-historico' },
                     { page: 'ajustes', icon: '⚙️', label: 'Ajustes', iconClass: 'icon-ajustes' },
                     { page: 'manual', icon: '📖', label: 'Manual de Usuario', iconClass: 'icon-manual' }
@@ -597,6 +597,7 @@
         navigateTo(currentPage);
         document.getElementById('activeProjectSelect').value = getActiveProject();
         updateSidebarDisabledState();
+        updatePageTitle(currentPage);
     }
     window.onProjectChange = () => {
         const sel = document.getElementById('activeProjectSelect');
@@ -662,14 +663,12 @@
             toast('Acceso denegado', 'error');
             return;
         }
-        
         // 2. Comprobar si requiere proyecto activo
         const ap = getActiveProject();
         if (projectRequiredPages.includes(page) && !ap) {
             toast('Selecciona un proyecto activo primero', 'warning');
             return;
         }
-
         // 3. Validar permisos adicionales (ej. informes/trazabilidad si están bloqueados)
         if (currentUser.rol === 'Consultor' && currentUser.proyectosAutorizados) {
             if (!currentUser.proyectosAutorizados.includes(ap) && ap) {
@@ -677,30 +676,60 @@
                 page = 'dashboard';
             }
         }
-
         // 4. Navegación y estado activo
         currentPage = page;
         saveLastPage(page);
-        
         // Limpiamos los activos de la barra lateral
         document.querySelectorAll('.sidebar-item, .nav-item').forEach(item => {
             item.classList.remove('active');
         });
-        
         // Buscamos el elemento y solo le aplicamos el 'active' si existe
         const activeItem = document.querySelector(`[data-page="${page}"]`) || document.querySelector(`.sidebar-item[onclick="navigateTo('${page}')"]`);
         if (activeItem) {
             activeItem.classList.add('active');
         }
-        
         // Y finalmente, llamamos al renderizado
         renderPage(page);
+        
+        // ✅ NUEVO: Actualizar título de la página
+        updatePageTitle(page);
         
         // Cierra el sidebar en móviles
         if (window.innerWidth <= 768) {
             document.getElementById('sidebar').classList.remove('open');
         }
     };
+
+    // ✅ NUEVA FUNCIÓN: Actualizar título de la página en el header
+    function updatePageTitle(page) {
+        const pageTitles = {
+            'dashboard': { icon: '📊', title: 'Dashboard' },
+            'proyectos': { icon: '📁', title: 'Proyectos' },
+            'objetivos': { icon: '🎯', title: 'Objetivos' },
+            'mejoras': { icon: '💡', title: 'Propuestas de Mejora' },
+            'usuarios': { icon: '👥', title: 'Gestión de Usuarios' },
+            'casos': { icon: '📋', title: 'Casos de Uso' },
+            'bugs': { icon: '🐛', title: 'Defectos' },
+            'ejecuciones': { icon: '▶️', title: 'Ejecuciones de Pruebas' },
+            'requisitos': { icon: '📑', title: 'Requisitos' },
+            'diario': { icon: '📝', title: 'Registro Diario' },
+            'capturas': { icon: '📸', title: 'Capturas QA' },
+            'apis': { icon: '🔌', title: 'Gestión APIs' },
+            'trazabilidad': { icon: '🔍', title: 'Trazabilidad' },
+            'informes': { icon: '📄', title: 'Informes' },
+            'historico': { icon: '📦', title: 'Histórico' },
+            'ajustes': { icon: '⚙️', title: 'Ajustes' },
+            'permisos': { icon: '', title: 'Permisos Consultores' },
+            'manual': { icon: '', title: 'Manual de Usuario' }
+        };
+        
+        const titleData = pageTitles[page] || { icon: '📄', title: page };
+        const iconEl = document.getElementById('pageTitleIcon');
+        const textEl = document.getElementById('pageTitleText');
+        
+        if (iconEl) iconEl.textContent = titleData.icon;
+        if (textEl) textEl.textContent = titleData.title;
+    }
 
     function updateSidebarDisabledState() {
         const proyectoActivo = getActiveProject();
@@ -748,6 +777,7 @@
         const si = content.querySelector('.search-input');
         if (si) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
     }
+
     function bindPageEvents(page) {
         const content = document.getElementById('contentArea');
         content.querySelector('.search-input')?.addEventListener('input', function (e) {
@@ -777,6 +807,9 @@
                 renderPage(page);
             })
         );
+        
+        // ✅ Inicializar tooltip de capturas QA
+        initCaptureTooltip();
     }
 
     function renderConsultantPermissions() {
@@ -1186,16 +1219,42 @@
                 `;
             break;
             case 'mejoras':
+            const categoriasMejora = ['Proceso QA', 'Herramientas', 'Automatización', 'Formación', 'Documentación', 'Infraestructura', 'Metodología', 'Otro'];
+            const impactos = ['Alto', 'Medio', 'Bajo'];
+            const estadosMejora = ['Propuesta', 'En evaluación', 'Aprobada', 'En implementación', 'Implementada', 'Descartada'];
             h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'MEJ-' + Date.now()}" ${d} id="f_id"></div>
-                <div class="form-group"><label>Título *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo"></div>
-                <div class="form-group"><label>Tipo de Mejora</label><select ${d} id="f_tipo"><option>Mejora UX/UI</option><option>Nueva funcionalidad</option><option>Optimización Técnica</option></select></div>
-                <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
-                <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
-                <option ${item?.estado === 'Pendiente de Revisión' ? 'selected' : ''}>Pendiente de Revisión</option>
-                <option ${item?.estado === 'Aprobado' ? 'selected' : ''}>Aprobado</option>
-                <option ${item?.estado === 'Descartado' ? 'selected' : ''}>Descartado</option>
+            <div class="form-group"><label>Título de la Mejora *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo" placeholder="Ej: Implementar tests automatizados con Cypress"></div>
+            <div class="form-group"><label>Categoría</label><select ${d} id="f_categoria">
+                ${categoriasMejora.map(c => `<option ${item?.categoria === c ? 'selected' : ''}>${c}</option>`).join('')}
+            </select></div>
+            <div class="form-group"><label>Descripción detallada</label><textarea ${d} id="f_descripcion" rows="4" placeholder="Describe la mejora, el problema actual y la solución propuesta...">${item?.descripcion || ''}</textarea></div>
+            <div class="form-group"><label>Beneficio esperado</label><textarea ${d} id="f_beneficio" rows="2" placeholder="¿Qué aporta esta mejora al equipo QA?">${item?.beneficio || ''}</textarea></div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad">
+                    <option ${item?.prioridad === 'Alta' ? 'selected' : ''}>Alta</option>
+                    <option ${item?.prioridad === 'Media' ? 'selected' : ''}>Media</option>
+                    <option ${item?.prioridad === 'Baja' ? 'selected' : ''}>Baja</option>
                 </select></div>
-                `;
+                <div class="form-group"><label>Impacto estimado</label><select ${d} id="f_impacto">
+                    ${impactos.map(i => `<option ${item?.impacto === i ? 'selected' : ''}>${i}</option>`).join('')}
+                </select></div>
+            </div>
+            <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
+                ${estadosMejora.map(e => `<option ${item?.estado === e ? 'selected' : ''}>${e}</option>`).join('')}
+            </select></div>
+            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
+                <div class="form-group"><label>Responsable de implementación</label><select ${d} id="f_responsable">
+                    <option value="">Sin asignar...</option>
+                    ${appData.usuarios.map(u => `<option value="${u.nombre}" ${item?.responsable === u.nombre ? 'selected' : ''}>${u.nombre}</option>`).join('')}
+                </select></div>
+                <div class="form-group"><label>Fecha objetivo</label><input type="date" value="${item?.fechaObjetivo || ''}" ${d} id="f_fechaObjetivo"></div>
+            </div>
+            <div class="form-group"><label>Notas / Comentarios adicionales</label><textarea ${d} id="f_notas" rows="2">${item?.notas || ''}</textarea></div>
+            `;
+            if (id) {
+                h += `<div id="commentsContainer_mejora_${id}"></div>`;
+                setTimeout(() => { renderCommentsSection('mejora', id); }, 50);
+            }
             break;
             case 'usuarios':
             const isConsultor = item?.rol === 'Consultor';
@@ -1223,7 +1282,6 @@
                 h += `<div class="form-group"><label>ID Caso</label><input value="${item?.id || 'CASO-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
                 
-                <!-- NUEVO: Selector de Requisito -->
                 <div class="form-group">
                     <label> Requisito Asociado</label>
                     <select ${d} id="f_requisito">
@@ -1256,6 +1314,16 @@
                 </div>
                 `;
                 if (id) {
+                    const captura = appData.capturas.find(c => c.vinculo === id && c.archivos);
+                    if (captura) {
+                        h += `<div class="detail-capture-container">
+                            <div class="detail-capture-label">📸 Captura QA Vinculada</div>
+                            <img src="${captura.archivos}" alt="Captura QA" onclick="window.open('${captura.archivos}', '_blank')" title="Click para ver en tamaño completo">
+                            <div style="margin-top:10px; font-size:0.8rem; color:var(--text2);">${captura.descripcion || 'Sin descripción'}</div>
+                        </div>`;
+                    }
+                }
+                if (id) {
                     h += `<div id="commentsContainer_caso_${id}"></div>`;
                     setTimeout(() => {
                         renderCommentsSection('caso', id);
@@ -1281,6 +1349,17 @@
                 <option ${item?.estado === 'Solucionado' ? 'selected' : ''}>Solucionado</option>
                 </select></div>
                 `;
+                // Mostrar captura QA si existe
+                if (id) {
+                    const captura = appData.capturas.find(c => c.vinculo === id && c.archivos);
+                    if (captura) {
+                        h += `<div class="detail-capture-container">
+                            <div class="detail-capture-label">📸 Captura QA Vinculada</div>
+                            <img src="${captura.archivos}" alt="Captura QA" onclick="window.open('${captura.archivos}', '_blank')" title="Click para ver en tamaño completo">
+                            <div style="margin-top:10px; font-size:0.8rem; color:var(--text2);">${captura.descripcion || 'Sin descripción'}</div>
+                        </div>`;
+                    }
+                }
                 if (id) {
                     h += `<div id="commentsContainer_bug_${id}"></div>`;
                     setTimeout(() => {
@@ -1644,15 +1723,13 @@
         if (appData.trazabilidad.length > 500) appData.trazabilidad = appData.trazabilidad.slice(-400);
     }
     // ============ GENERIC TABLE ============
-    function renderTable(page, cols, data, rowFn, showActions = true) {
+    function renderTable(page, cols, data, rowFn, showActions = true, entityType = null) {
         // Si no hay datos, mostrar mensaje
         if (!data || !Array.isArray(data)) {
             data = [];
         }
-        
         // Filtrar por término de búsqueda
         let filtered = searchTerm ? data.filter(i => JSON.stringify(i).toLowerCase().includes(searchTerm)) : data;
-        
         // Ordenar si está configurado
         if (sortConfig.field) {
             filtered.sort((a, b) =>
@@ -1660,14 +1737,12 @@
                 (sortConfig.dir === 'asc' ? 1 : -1)
             );
         }
-        
         const totalPages = Math.ceil(filtered.length / pageSize) || 1;
         const pg = Math.min(currentPages[page] || 1, totalPages);
         currentPages[page] = pg;
         const paged = filtered.slice((pg - 1) * pageSize, pg * pageSize);
-        
         let h = `<div class="table-container"><div class="table-toolbar">
-            <input class="search-input" placeholder=" Buscar..." value="${searchTerm}">
+            <input class="search-input" placeholder="🔍 Buscar..." value="${searchTerm}">
             <select class="page-size-select">
             <option ${pageSize === 5 ? 'selected' : ''}>5</option>
             <option ${pageSize === 10 ? 'selected' : ''}>10</option>
@@ -1677,21 +1752,18 @@
             <span style="color:var(--text2); font-size:0.85rem;">${filtered.length} resultados</span>
             ${showActions ? `<button class="btn btn-accent btn-sm" data-action="create">➕ Nuevo</button>` : ''}
             </div><div style="overflow-x:auto;"><table><thead><tr>`;
-        
         cols.forEach(c => h += `<th data-sort="${c.field}">${c.label} ${sortConfig.field === c.field ? (sortConfig.dir === 'asc' ? '▲' : '▼') : ''}</th>`);
         if (showActions) h += '<th style="width:120px;">Acciones</th>';
         h += '</tr></thead><tbody>';
-        
         if (paged.length === 0) {
             h += `<tr><td colspan="${cols.length + (showActions ? 1 : 0)}" style="text-align:center;padding:40px;">
-            <div class="empty-state-icon"></div>
+            <div class="empty-state-icon">📭</div>
             <div style="color:var(--text2);">No hay registros</div>
             </td></tr>`;
         }
-        
         // Renderizar solo las filas visibles (mejora de rendimiento)
         paged.forEach(item => {
-            h += `<tr>${rowFn(item)}`;
+            h += `<tr data-entity-type="${entityType || ''}" data-entity-id="${item.id}">${rowFn(item)}`;
             if (showActions) h += `<td class="actions-cell">
             <button data-action="view" data-id="${item.id}" title="Ver">👁</button>
             <button data-action="edit" data-id="${item.id}" title="Editar">✏️</button>
@@ -1699,9 +1771,7 @@
             </td>`;
             h += `</tr>`;
         });
-        
         h += `</tbody></table></div>`;
-        
         // Paginación optimizada
         if (totalPages > 1) {
             h += `<div class="pagination">`;
@@ -1720,11 +1790,59 @@
             }
             h += `</div>`;
         }
-        
         return h + '</div>';
     }
 
-
+    // Función para mostrar tooltip de captura QA al hacer hover
+    function initCaptureTooltip() {
+        const tooltip = document.createElement('div');
+        tooltip.className = 'qa-capture-tooltip';
+        document.body.appendChild(tooltip);
+        
+        document.addEventListener('mouseover', (e) => {
+            const row = e.target.closest('tr[data-entity-type]');
+            if (!row) return;
+            
+            const entityType = row.dataset.entityType;
+            const entityId = row.dataset.entityId;
+            
+            if (!entityType || !entityId) return;
+            
+            // Buscar captura vinculada
+            const captura = appData.capturas.find(c => c.vinculo === entityId && c.archivos);
+            if (!captura) return;
+            
+            // Mostrar tooltip
+            tooltip.innerHTML = `
+                <div class="tooltip-label">📸 Captura QA Vinculada</div>
+                <img src="${captura.archivos}" alt="Captura">
+            `;
+            tooltip.classList.add('visible');
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!tooltip.classList.contains('visible')) return;
+            
+            // Posicionar tooltip cerca del cursor pero sin bloquear
+            const x = e.clientX + 15;
+            const y = e.clientY + 15;
+            
+            // Ajustar si se sale de la pantalla
+            const tooltipRect = tooltip.getBoundingClientRect();
+            const adjustedX = x + tooltipRect.width > window.innerWidth ? e.clientX - tooltipRect.width - 15 : x;
+            const adjustedY = y + tooltipRect.height > window.innerHeight ? e.clientY - tooltipRect.height - 15 : y;
+            
+            tooltip.style.left = adjustedX + 'px';
+            tooltip.style.top = adjustedY + 'px';
+        });
+        
+        document.addEventListener('mouseout', (e) => {
+            const row = e.target.closest('tr[data-entity-type]');
+            if (row) {
+                tooltip.classList.remove('visible');
+            }
+        });
+    }
 
     const itemsPerPage = 10; // Límite de elementos por página
     function generarPaginador(totalItems, currentPage, funcionCambioPagina) {
@@ -1920,9 +2038,39 @@ ${renderDonutChart('Severidad Bugs', [
     }
     function renderMejoras() {
         const data = filterByProject(appData.mejoras);
-        const cols = [{ label: 'ID' }, { label: 'Título' }, { label: 'Tipo' }, { label: 'Estado' }];
-        return '<h1 class="page-title">💡 Propuestas</h1>' +
-            renderTable('mejoras', cols, data, i => `<td>${i.id}</td><td>${i.titulo || ''}</td><td>${i.tipo || '-'}</td><td><span class="badge ${i.estado === 'Aprobado' ? 'badge-success' : i.estado === 'Descartado' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
+        const cols = [
+            { label: 'ID', field: 'id' },
+            { label: 'Título', field: 'titulo' },
+            { label: 'Categoría', field: 'categoria' },
+            { label: 'Prioridad', field: 'prioridad' },
+            { label: 'Estado', field: 'estado' },
+            { label: 'Responsable', field: 'responsable' }
+        ];
+        return '<h1 class="page-title">💡 Mejoras para el Equipo QA</h1>' +
+        '<p class="page-subtitle">Propuestas de mejora para optimizar procesos, herramientas y metodología QA</p>' +
+        renderTable('mejoras', cols, data, i => {
+            const estadoClass = {
+                'Propuesta': 'badge-info',
+                'En evaluación': 'badge-warning',
+                'Aprobada': 'badge-purple',
+                'En implementación': 'badge-info',
+                'Implementada': 'badge-success',
+                'Descartada': 'badge-neutral'
+            }[i.estado] || 'badge-neutral';
+            
+            const prioridadClass = {
+                'Alta': 'badge-danger',
+                'Media': 'badge-warning',
+                'Baja': 'badge-info'
+            }[i.prioridad] || 'badge-info';
+            
+            return `<td><code>${i.id}</code></td>
+                    <td><b>${i.titulo || ''}</b></td>
+                    <td><span class="badge badge-purple">${i.categoria || 'Otro'}</span></td>
+                    <td><span class="badge ${prioridadClass}">${i.prioridad || 'Media'}</span></td>
+                    <td><span class="badge ${estadoClass}">${i.estado || 'Propuesta'}</span></td>
+                    <td>${i.responsable || '<span style="color:var(--text2);">Sin asignar</span>'}</td>`;
+        });
     }
     function renderUsuarios() {
         const cols = [{ label: 'ID', field: 'id' }, { label: 'Nombre', field: 'nombre' }, { label: 'Usuario', field: 'usuario' }, { label: 'Rol', field: 'rol' }];
@@ -1944,13 +2092,16 @@ ${renderDonutChart('Severidad Bugs', [
         return '<h1 class="page-title">📋 Casos de Uso</h1>' + 
         renderTable('casos', cols, data, i => {
             const req = appData.requisitos.find(r => r.id === i.requisito);
-            return `<td><code>${i.id}</code></td>
+            const captura = appData.capturas.find(c => c.vinculo === i.id && c.archivos);
+            const hasCapture = captura ? 'has-capture-indicator' : '';
+            
+            return `<td class="${hasCapture}"><code>${i.id}</code></td>
                     <td>${req ? `<span class="badge badge-purple" title="${req.titulo}">${i.requisito}</span>` : '<span style="color:var(--text2);">-</span>'}</td>
                     <td><b>${i.titulo || ''}</b></td>
                     <td><span class="badge ${i.prioridad === 'Crítica' ? 'badge-danger' : i.prioridad === 'Alta' ? 'badge-warning' : 'badge-info'}">${i.prioridad || 'Media'}</span></td>
                     <td>${i.actor || '-'}</td>
                     <td><span class="badge ${i.estado === 'Pasado' ? 'badge-success' : i.estado === 'Fallido' ? 'badge-danger' : 'badge-neutral'}">${i.estado || 'Pendiente'}</span></td>`;
-        });
+        }, true, 'caso');
     }
     function renderDiario() {
         // Ahora filtramos por el proyecto activo
@@ -2025,9 +2176,17 @@ ${renderDonutChart('Severidad Bugs', [
     function renderBugs() {
         const data = filterByProject(appData.bugs).filter(b => b.estado !== 'Solucionado');
         const cols = [{ label: 'ID', field: 'id' }, { label: 'Título', field: 'titulo' }, { label: 'Severidad', field: 'severidad' }, { label: 'Caso', field: 'casoRelacionado' }, { label: 'Estado', field: 'estado' }];
-        return '<h1 class="page-title">🐛 Bugs Activos</h1>' + renderTable('bugs', cols, data, i =>
-            `<td><code>${i.id}</code></td><td><b>${i.titulo}</b></td><td><span class="badge ${i.severidad === 'Bloqueante' ? 'badge-danger' : i.severidad === 'Crítica' ? 'badge-warning' : 'badge-info'}">${i.severidad}</span></td><td><code>${i.casoRelacionado || '-'}</code></td><td><span class="badge ${i.estado === 'Abierto' ? 'badge-danger' : 'badge-warning'}">${i.estado}</span></td>`
-        );
+        
+        return '<h1 class="page-title">🐛 Bugs Activos</h1>' + renderTable('bugs', cols, data, i => {
+            const captura = appData.capturas.find(c => c.vinculo === i.id && c.archivos);
+            const hasCapture = captura ? 'has-capture-indicator' : '';
+            
+            return `<td class="${hasCapture}"><code>${i.id}</code></td>
+                    <td><b>${i.titulo}</b></td>
+                    <td><span class="badge ${i.severidad === 'Bloqueante' ? 'badge-danger' : i.severidad === 'Crítica' ? 'badge-warning' : 'badge-info'}">${i.severidad}</span></td>
+                    <td><code>${i.casoRelacionado || '-'}</code></td>
+                    <td><span class="badge ${i.estado === 'Abierto' ? 'badge-danger' : 'badge-warning'}">${i.estado}</span></td>`;
+        }, true, 'bug');
     }
     function renderHistorico() {
         const data = filterByProject(appData.bugs).filter(b => b.estado === 'Solucionado');
