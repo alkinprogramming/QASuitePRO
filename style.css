@@ -1975,3 +1975,8 @@ tr:hover td {
         grid-column: span 1;
     }
 }
+
+.icon-requisitos {
+    background: rgba(139, 92, 246, 0.15);
+    color: #a78bfa;
+}
