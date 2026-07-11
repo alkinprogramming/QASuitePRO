@@ -78,15 +78,20 @@
 
                 <!-- Header -->
                 <header class="header">
-                    <div class="header-left">
-                        <button class="burger" onclick="toggleSidebar()">☰</button>
-                        <div class="project-selector">
-                            <span>📌</span>
-                            <select id="activeProjectSelect" onchange="onProjectChange()">
-                                <option value="">-- Selecciona un Proyecto --</option>
-                            </select>
-                        </div>
+                <div class="header-left">
+                    <button class="burger" onclick="toggleSidebar()">☰</button>
+                    <div class="project-selector">
+                        <span>📌</span>
+                        <select id="activeProjectSelect" onchange="onProjectChange()">
+                            <option value="">-- Selecciona un Proyecto --</option>
+                        </select>
                     </div>
+                    <!-- NUEVO: Título de la página actual -->
+                    <div id="pageTitleDisplay" style="margin-left: 20px; font-weight: 600; font-size: 1.1rem; color: var(--text); display: flex; align-items: center; gap: 8px;">
+                        <span id="pageTitleIcon">📊</span>
+                        <span id="pageTitleText">Dashboard</span>
+                    </div>
+                </div>
 
                     <div class="header-right">
                         <button class="icon-btn" onclick="navigateTo('manual')" title="Manual de Usuario">
