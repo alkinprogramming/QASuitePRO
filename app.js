@@ -4,7 +4,8 @@
     let appData = {
         usuarios: [], proyectos: [], objetivos: [], casos: [], bugs: [],
         ejecuciones: [], capturas: [], registroDiario: [], apis: [], mejoras: [],
-        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' }, comentarios: []
+        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' }, 
+        comentarios: [], requisitos: []
     };
     let currentUser = null, currentPage = 'dashboard', sortConfig = { field: null, dir: 'asc' };
     let searchTerm = '', pageSize = 10, currentPages = {};
@@ -16,7 +17,7 @@
     let activeSubscriptions = {};
 
     const projectRequiredPages = ['casos', 'bugs', 'ejecuciones', 'diario', 'capturas', 'apis', 'trazabilidad', 'informes', 'historico', 'mejoras', 'objetivos'];
-    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario'];
+    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario', 'manual', 'requisitos'];
 
     const cache = {
         data: {},
@@ -111,7 +112,8 @@
                         trazabilidad: Array.isArray(data.trazabilidad) ? data.trazabilidad : (appData.trazabilidad || []),
                         comentarios: Array.isArray(data.comentarios) ? data.comentarios : (appData.comentarios || []),
                         notificaciones: Array.isArray(data.notificaciones) ? data.notificaciones : [],
-                        configuracion: data.configuracion || { theme: 'dark', activeProject: '' }
+                        configuracion: data.configuracion || { theme: 'dark', activeProject: '' },
+                        requisitos: Array.isArray(data.requisitos) ? data.requisitos : (appData.requisitos || []),
                     };
                     
                     notifications = appData.notificaciones || [];
@@ -161,6 +163,7 @@
         if (!Array.isArray(appData.registroDiario)) appData.registroDiario = [];
         if (!Array.isArray(appData.comentarios)) appData.comentarios = [];
         if (!appData.configuracion) appData.configuracion = { theme: 'dark', activeProject: '' };
+        if (!Array.isArray(appData.requisitos)) appData.requisitos = [];
         
         notifications = appData.notificaciones || [];
         applyTheme();
@@ -181,17 +184,18 @@
     function filterByProject(arr, key = 'proyecto') {
         const ap = getActiveProject();
         if (!arr || !Array.isArray(arr)) return [];
-
         let result = arr;
 
-        // Filtrar por proyecto activo
-        if (ap) {
-            result = result.filter(i => (i[key] || i.proyecto) === ap);
+        // 1. Si es consultor, SOLO puede ver datos de sus proyectos autorizados
+        if (currentUser && currentUser.rol === 'Consultor') {
+            const authProjects = currentUser.proyectosAutorizados || [];
+            if (authProjects.length === 0) return []; // Sin permisos, no ve nada
+            result = result.filter(i => authProjects.includes(i.proyecto));
         }
 
-        // Si es consultor, SOLO ve sus propios registros
-        if (currentUser && currentUser.rol === 'Consultor') {
-            result = result.filter(i => i.creadoPor === currentUser.id);
+        // 2. Filtrar por proyecto activo si está seleccionado
+        if (ap) {
+            result = result.filter(i => (i[key] || i.proyecto) === ap);
         }
 
         return result;
@@ -215,17 +219,61 @@
         document.getElementById('appScreen').style.display = 'flex';
         document.getElementById('userDisplay').textContent = currentUser.nombre.split(' ')[0];
         document.getElementById('userAvatar').textContent = currentUser.nombre.split(' ')[0].charAt(0).toUpperCase();
-        
+
         // Ocultar Ajustes si no es admin
         const menuAjustes = document.getElementById('menuAjustes');
         if (menuAjustes && currentUser.rol !== 'Admin') {
             menuAjustes.style.display = 'none';
         }
-        
+
         buildSidebar();
+
+        // ✅ Forzar proyecto activo ANTES de renderizar si el consultor tiene exactamente 1
+        if (currentUser.rol === 'Consultor') {
+            const authProjects = currentUser.proyectosAutorizados || [];
+            if (authProjects.length === 1) {
+                appData.configuracion.activeProject = authProjects[0];
+                saveData();
+            } else if (authProjects.length > 1) {
+                // Con varios proyectos, dejar en "Todos los proyectos" si no hay uno activo
+                const currentActive = getActiveProject();
+                if (!currentActive || !authProjects.includes(currentActive)) {
+                    appData.configuracion.activeProject = '';
+                    saveData();
+                }
+            }
+        }
+
         initApp();
         updateNotificationBadge();
+
+        // Validación: Consultores sin proyectos asignados
+        if (currentUser.rol === 'Consultor') {
+            const authProjects = currentUser.proyectosAutorizados || [];
+            if (authProjects.length === 0) {
+                showNoProjectAccessModal();
+            }
+        }
     }
+    function showNoProjectAccessModal() {
+        const container = document.getElementById('modalContainer');
+        container.innerHTML = `
+            <div class="modal-overlay" style="background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(10px);">
+                <div class="modal" style="max-width: 500px; text-align: center; border-top: 5px solid var(--danger);">
+                    <div style="font-size: 4rem; margin-bottom: 20px;">🔒</div>
+                    <h2 style="color: var(--danger); margin-bottom: 15px; font-size: 1.5rem;">Acceso Restringido</h2>
+                    <p style="color: var(--text2); font-size: 1rem; line-height: 1.6; margin-bottom: 30px;">
+                        Tu cuenta ha sido creada correctamente, pero actualmente <strong>no tienes ningún proyecto asignado</strong>.<br><br>
+                        Por favor, <strong>contacta con el administrador</strong> para que te asigne los proyectos a los que puedes acceder y poder comenzar a trabajar.
+                    </p>
+                    <button class="btn btn-danger" onclick="handleLogout(true)" style="width: 100%; justify-content: center; padding: 14px; font-size: 1rem;">
+                        🚪 Cerrar Sesión
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
     function buildSidebar() {
         const sidebar = document.getElementById('sidebar');
         const isConsultor = currentUser.rol === 'Consultor';
@@ -243,7 +291,8 @@
                 section: 'QA Técnico', items: [
                     { page: 'casos', icon: '📋', label: 'Casos de Uso', iconClass: 'icon-casos' },
                     { page: 'bugs', icon: '🐛', label: 'Defectos', iconClass: 'icon-bugs' },
-                    { page: 'ejecuciones', icon: '▶️', label: 'Ejecuciones', iconClass: 'icon-ejecuciones' }
+                    { page: 'ejecuciones', icon: '▶️', label: 'Ejecuciones', iconClass: 'icon-ejecuciones' },
+                    { page: 'requisitos', icon: '📑', label: 'Requisitos', iconClass: 'icon-requisitos' }
                 ]
             },
             {
@@ -258,7 +307,8 @@
                     { page: 'trazabilidad', icon: '🔍', label: 'Trazabilidad', iconClass: 'icon-trazabilidad' },
                     { page: 'informes', icon: '📄', label: 'Informes', iconClass: 'icon-informes' },
                     { page: 'historico', icon: '📦', label: 'Histórico', iconClass: 'icon-historico' },
-                    { page: 'ajustes', icon: '⚙️', label: 'Ajustes', iconClass: 'icon-ajustes' }
+                    { page: 'ajustes', icon: '⚙️', label: 'Ajustes', iconClass: 'icon-ajustes' },
+                    { page: 'manual', icon: '📖', label: 'Manual de Usuario', iconClass: 'icon-manual' }
                 ], adminOnly: true
             },
             {
@@ -300,14 +350,27 @@
         const u = document.getElementById('regUser').value.trim();
         const p = document.getElementById('regPass').value;
         const p2 = document.getElementById('regPass2').value;
-        const r = document.getElementById('regRole').value;
+        
+        // Ya no leemos el rol del formulario. Lo fijamos por defecto.
+        const rolInicial = 'Consultor'; 
+        
         if (!n || !u || !p) return toast('Completa todos los campos', 'error');
         if (p.length < 6) return toast('Mínimo 6 caracteres', 'error');
         if (p !== p2) return toast('Contraseñas no coinciden', 'error');
         if (appData.usuarios.find(x => x.usuario === u)) return toast('Usuario ya existe', 'error');
-        appData.usuarios.push({ id: Date.now(), nombre: n, usuario: u, password: p, rol: r });
+        
+        // Guardamos el usuario con el rol por defecto y sin proyectos autorizados aún
+        appData.usuarios.push({ 
+            id: Date.now(), 
+            nombre: n, 
+            usuario: u, 
+            password: p, 
+            rol: rolInicial,
+            proyectosAutorizados: [] // Se inicializa vacío para que el Admin los asigne después
+        });
+        
         saveData();
-        toast('Registro exitoso', 'success');
+        toast('Registro exitoso. Un admin debe activar tu rol.', 'success');
         window.showLogin();
     };
     window.doLogin = () => {
@@ -321,13 +384,27 @@
         showApp();
         toast(`Bienvenido, ${found.nombre.split(' ')[0]}`, 'success');
     };
-    window.handleLogout = () => showConfirmModal('¿Cerrar sesión?', () => {
-        currentUser = null;
-        clearSession();
-        localStorage.removeItem(PAGE_KEY);
-        document.getElementById('authScreen').style.display = 'flex';
-        document.getElementById('appScreen').style.display = 'none';
-    });
+    window.handleLogout = (forceLogout = false) => {
+        if (forceLogout) {
+            // Cierre forzado sin confirmación (desde modal de acceso restringido)
+            currentUser = null;
+            clearSession();
+            localStorage.removeItem(PAGE_KEY);
+            document.getElementById('authScreen').style.display = 'flex';
+            document.getElementById('appScreen').style.display = 'none';
+            document.getElementById('modalContainer').innerHTML = ''; // Limpiar modal
+            toast('Sesión cerrada', 'info');
+        } else {
+            // Cierre normal con confirmación
+            showConfirmModal('¿Cerrar sesión?', () => {
+                currentUser = null;
+                clearSession();
+                localStorage.removeItem(PAGE_KEY);
+                document.getElementById('authScreen').style.display = 'flex';
+                document.getElementById('appScreen').style.display = 'none';
+            });
+        }
+    };
     // ============ THEME ============
     function applyTheme() {
         document.body.classList.toggle('light-mode', appData.configuracion.theme === 'light');
@@ -522,7 +599,12 @@
         updateSidebarDisabledState();
     }
     window.onProjectChange = () => {
-        appData.configuracion.activeProject = document.getElementById('activeProjectSelect').value;
+        const sel = document.getElementById('activeProjectSelect');
+
+        // ✅ Impedir cambio si el selector está deshabilitado (consultor con 1 proyecto)
+        if (sel && sel.disabled) return;
+
+        appData.configuracion.activeProject = sel.value;
         saveData();
         renderPage(currentPage);
         updateSidebarDisabledState();
@@ -530,66 +612,99 @@
     function populateProjectSelector() {
         const sel = document.getElementById('activeProjectSelect');
         if (!sel) return;
-        
+
         let projectsToShow = appData.proyectos || [];
-        
-        // Si es consultor, mostrar solo sus proyectos autorizados
-        if (currentUser && currentUser.rol === 'Consultor' && currentUser.proyectosAutorizados && currentUser.proyectosAutorizados.length > 0) {
-            projectsToShow = projectsToShow.filter(p => currentUser.proyectosAutorizados.includes(p.id));
+        const isConsultor = currentUser && currentUser.rol === 'Consultor';
+        const authProjects = isConsultor ? (currentUser.proyectosAutorizados || []) : [];
+
+        // Filtrar proyectos visibles para consultores
+        if (isConsultor && authProjects.length > 0) {
+            projectsToShow = projectsToShow.filter(p => authProjects.includes(p.id));
         }
-        
-        sel.innerHTML = '<option value="">Todos los proyectos</option>';
+
+        // Sin proyectos disponibles
         if (!Array.isArray(projectsToShow) || projectsToShow.length === 0) {
             sel.innerHTML = '<option value="">Sin proyectos disponibles</option>';
+            sel.disabled = true;
             return;
         }
-        projectsToShow.forEach(p =>
-            sel.innerHTML += `<option value="${p.id}" ${p.id === getActiveProject() ? 'selected' : ''}>${p.nombre || p.id}</option>`
-        );
+
+        // ✅ CASO 1: Consultor con exactamente 1 proyecto → BLOQUEADO
+        if (isConsultor && projectsToShow.length === 1) {
+            const singleProject = projectsToShow[0];
+            sel.innerHTML = `<option value="${singleProject.id}" selected>🔒 ${singleProject.nombre || singleProject.id}</option>`;
+            sel.disabled = true;
+            sel.title = 'Proyecto asignado por el administrador';
+            // Forzar el proyecto activo
+            appData.configuracion.activeProject = singleProject.id;
+            return;
+        }
+
+        // ✅ CASO 2: Consultor con más de 1 proyecto o Admin → HABILITADO
+        sel.disabled = false;
+        sel.title = '';
+
+        let html = '<option value="">Todos los proyectos</option>';
+        projectsToShow.forEach(p => {
+            html += `<option value="${p.id}" ${p.id === getActiveProject() ? 'selected' : ''}>${p.nombre || p.id}</option>`;
+        });
+        sel.innerHTML = html;
+
+        // Si es consultor con varios proyectos y no hay proyecto activo, forzar "Todos"
+        if (isConsultor && projectsToShow.length > 1 && !getActiveProject()) {
+            sel.value = '';
+        }
     }
 
-    window.navigateTo = function (page) {
-        // 1. Validación de permisos para Consultores
-        if (currentUser.rol === 'Consultor' && !consultorPages.includes(page)) {
-            toast('No tienes permiso para acceder a esta sección', 'error');
+    window.navigateTo = (page) => {
+        // 1. Validar que la página esté permitida
+        if (currentUser.rol === 'Consultor' && !consultorPages.includes(page) && page !== 'dashboard') {
+            toast('Acceso denegado', 'error');
             return;
         }
         
-        // 2. Bloquear acceso si no hay proyecto activo (excepto páginas exentas)
-        const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes', 'permisos'];
-        const requiereProyecto = projectRequiredPages.includes(page);
-        if (requiereProyecto && !getActiveProject() && !paginasExentas.includes(page)) {
-            toast('⚠️ Selecciona un proyecto antes de acceder a esta sección', 'warning');
-            if (currentPage !== page) {
-                page = 'dashboard';
-            } else {
-                return;
-            }
+        // 2. Comprobar si requiere proyecto activo
+        const ap = getActiveProject();
+        if (projectRequiredPages.includes(page) && !ap) {
+            toast('Selecciona un proyecto activo primero', 'warning');
+            return;
         }
-        
-        // 3. Validación adicional para Consultores sin proyectos asignados
-        if (currentUser.rol === 'Consultor' && projectRequiredPages.includes(page)) {
-            if (!currentUser.proyectosAutorizados || currentUser.proyectosAutorizados.length === 0) {
-                toast('No tienes proyectos asignados. Contacta al administrador.', 'error');
+
+        // 3. Validar permisos adicionales (ej. informes/trazabilidad si están bloqueados)
+        if (currentUser.rol === 'Consultor' && currentUser.proyectosAutorizados) {
+            if (!currentUser.proyectosAutorizados.includes(ap) && ap) {
+                toast('No tienes acceso a los datos de este proyecto', 'error');
                 page = 'dashboard';
             }
         }
-        
-        // 4. Navegación normal
+
+        // 4. Navegación y estado activo
         currentPage = page;
         saveLastPage(page);
-        document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-        const activeNav = document.querySelector(`[data-page="${page}"]`);
-        if (activeNav) activeNav.classList.add('active');
+        
+        // Limpiamos los activos de la barra lateral
+        document.querySelectorAll('.sidebar-item, .nav-item').forEach(item => {
+            item.classList.remove('active');
+        });
+        
+        // Buscamos el elemento y solo le aplicamos el 'active' si existe
+        const activeItem = document.querySelector(`[data-page="${page}"]`) || document.querySelector(`.sidebar-item[onclick="navigateTo('${page}')"]`);
+        if (activeItem) {
+            activeItem.classList.add('active');
+        }
+        
+        // Y finalmente, llamamos al renderizado
         renderPage(page);
         
-        // 5. Actualizar estado visual del sidebar
-        updateSidebarDisabledState();
+        // Cierra el sidebar en móviles
+        if (window.innerWidth <= 768) {
+            document.getElementById('sidebar').classList.remove('open');
+        }
     };
 
     function updateSidebarDisabledState() {
         const proyectoActivo = getActiveProject();
-        const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes'];
+        const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes', 'manual'];
         
         document.querySelectorAll('.nav-item').forEach(item => {
             const page = item.dataset.page;
@@ -625,6 +740,8 @@
             case 'historico': html = renderHistorico(); break;
             case 'ajustes': html = renderAjustes(); break;
             case 'permisos': html = renderConsultantPermissions(); break;
+            case 'manual': html = renderManual(); break;
+            case 'requisitos': html = renderRequisitos(); break;
         }
         content.innerHTML = html;
         bindPageEvents(page);
@@ -694,6 +811,161 @@
         return html;
     }
 
+    function renderManual() {
+        const html = `
+            <div class="manual-container" style="max-width: 1000px; margin: 0 auto; padding-bottom: 40px; animation: fadeIn 0.3s ease;">
+                <div style="display:flex; justify-content:space-between; align-items:flex-end; margin-bottom:20px;">
+                    <div>
+                        <h1 class="page-title">📖 Manual de Usuario</h1>
+                        <p class="page-subtitle">Guía de uso oficial para QA Suite PRO</p>
+                    </div>
+                </div>
+                <div class="dashboard-grid" style="grid-template-columns: 1fr; gap: 20px;">
+                    <div class="chart-card">
+                        <div class="chart-title" style="color: var(--accent);"><span style="font-size:1.2rem;">🔄</span> 1. Flujo de Trabajo (El Ciclo QA)</div>
+                        <p style="color: var(--text2); line-height: 1.6; margin-bottom: 12px; font-size: 0.95rem;">
+                            El sistema está diseñado para mantener una trazabilidad completa, estilo JIRA/XRay. El ciclo ideal es:
+                        </p>
+                        <div style="background: var(--bg2); padding: 15px; border-radius: 8px; border: 1px dashed var(--border);">
+                            <ol style="color: var(--text); line-height: 1.8; margin-left: 20px; font-size: 0.9rem;">
+                                <li><strong>Elegir Proyecto:</strong> Selecciona el proyecto en el desplegable superior.</li>
+                                <li><strong>Crear Casos (📋):</strong> Define qué se va a probar (Request/Response o Pasos de usuario).</li>
+                                <li><strong>Ejecutar (▶️):</strong> Agrupa los casos en un ciclo y márcalos como <span style="color:var(--success)">Pasado</span> o <span style="color:var(--danger)">Fallido</span>.</li>
+                                <li><strong>Reportar Defectos (🐛):</strong> Si una ejecución falla, se creará o registrará un Bug vinculado directamente.</li>
+                            </ol>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <div class="chart-title" style="color: var(--accent);"><span style="font-size:1.2rem;">⚡</span> 2. Atajos de Teclado y Productividad</div>
+                        <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 15px;">
+                            <div style="background: var(--bg2); padding: 15px; border-radius: 8px; border: 1px solid var(--border);">
+                                <div style="display:flex; justify-content:space-between; color: var(--text2); font-size: 0.9rem; align-items:center;">
+                                    <span>Buscador Global Inteligente</span>
+                                    <kbd style="background: var(--input-bg); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); font-weight: 600; color: var(--text);">Ctrl + K</kbd>
+                                </div>
+                                <p style="font-size:0.8rem; color:var(--text2); margin-top:8px;">Busca en cualquier módulo rápidamente.</p>
+                            </div>
+                            <div style="background: var(--bg2); padding: 15px; border-radius: 8px; border: 1px solid var(--border);">
+                                <div style="display:flex; justify-content:space-between; color: var(--text2); font-size: 0.9rem; align-items:center;">
+                                    <span>Alternar Tema Visual</span>
+                                    <kbd style="background: var(--input-bg); padding: 4px 8px; border-radius: 4px; border: 1px solid var(--border); font-weight: 600; color: var(--text);">Ctrl + T</kbd>
+                                </div>
+                                <p style="font-size:0.8rem; color:var(--text2); margin-top:8px;">Cambia entre modo claro y oscuro.</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="dashboard-grid" style="grid-template-columns: 1fr 1fr; gap: 20px;">
+                        <div class="chart-card">
+                            <div class="chart-title" style="color: var(--accent);"><span style="font-size:1.2rem;">🛡️</span> Roles del Sistema</div>
+                            <ul style="color: var(--text2); line-height: 1.8; margin-left: 20px; font-size: 0.9rem; margin-top: 10px;">
+                                <li><strong>Admin:</strong> Control total, creación de proyectos y vistas.</li>
+                                <li><strong>Consultor:</strong> Entorno asilado. Solo ve los proyectos y registros donde es propietario/asignado.</li>
+                            </ul>
+                        </div>
+                        <div class="chart-card">
+                            <div class="chart-title" style="color: var(--accent);"><span style="font-size:1.2rem;">🔌</span> Pruebas Backend</div>
+                            <ul style="color: var(--text2); line-height: 1.8; margin-left: 20px; font-size: 0.9rem; margin-top: 10px;">
+                                <li>El módulo <strong>Gestión APIs</strong> es independiente.</li>
+                                <li>Documenta los endpoints y tiempos de respuesta sin mezclarlo con el front-end.</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // ✅ CORRECCIÓN: Devolvemos el HTML en lugar de inyectarlo directamente
+        return html; 
+    }
+
+    function renderRequisitos() {
+        const data = filterByProject(appData.requisitos);
+        const cols = [
+            { label: 'ID', field: 'id' }, 
+            { label: 'Requisito', field: 'titulo' }, 
+            { label: 'Descripción', field: 'descripcion' },
+            { label: 'Tipo', field: 'tipo' },
+            { label: 'Casos', field: 'casos' },
+            { label: 'APIs', field: 'apis' }
+        ];
+        return '<h1 class="page-title">📑 Requisitos</h1>' + 
+        renderTable('requisitos', cols, data, i => {
+            const casosCount = appData.casos.filter(c => c.requisito === i.id).length;
+            const apisCount = appData.apis.filter(a => a.requisito === i.id).length;
+            return `<td><code>${i.id}</code></td>
+                    <td><b>${i.titulo || ''}</b></td>
+                    <td>${i.descripcion || '-'}</td>
+                    <td><span class="badge badge-info">${i.tipo || 'Funcional'}</span></td>
+                    <td><span class="badge badge-purple">${casosCount} casos</span></td>
+                    <td><span class="badge badge-purple">${apisCount} APIs</span></td>`;
+        });
+    }
+
+    function renderVistaPorRequisito() {
+        const requisitos = filterByProject(appData.requisitos);
+        let html = '<h1 class="page-title">📊 Cobertura por Requisito</h1>';
+        
+        if (requisitos.length === 0) {
+            html += '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No hay requisitos creados</div></div>';
+            return html;
+        }
+        
+        html += '<div class="chart-grid">';
+        requisitos.forEach(req => {
+            const casos = appData.casos.filter(c => c.requisito === req.id);
+            const apis = appData.apis.filter(a => a.requisito === req.id);
+            const casosPasados = casos.filter(c => c.estado === 'Pasado').length;
+            const casosFallidos = casos.filter(c => c.estado === 'Fallido').length;
+            const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
+            
+            html += `
+            <div class="chart-card">
+                <div class="chart-title">📋 ${req.id} - ${req.titulo}</div>
+                <div style="color:var(--text2); font-size:0.85rem; margin-bottom:15px;">${req.descripcion || 'Sin descripción'}</div>
+                
+                <div style="display:flex; gap:10px; margin-bottom:15px;">
+                    <span class="badge badge-info">${casos.length} Casos</span>
+                    <span class="badge badge-purple">${apis.length} APIs</span>
+                </div>
+                
+                ${casos.length > 0 ? `
+                <div style="margin-bottom:12px;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px;">
+                        <span>Cobertura Casos</span>
+                        <span>${casos.length > 0 ? Math.round((casosPasados/casos.length)*100) : 0}%</span>
+                    </div>
+                    <div style="height:6px; background:var(--bg2); border-radius:3px; overflow:hidden;">
+                        <div style="width:${casos.length > 0 ? (casosPasados/casos.length)*100 : 0}%; height:100%; background:var(--success);"></div>
+                    </div>
+                    <div style="font-size:0.75rem; color:var(--text2); margin-top:4px;">
+                        ✅ ${casosPasados} pasados | ❌ ${casosFallidos} fallidos
+                    </div>
+                </div>` : '<div style="color:var(--text2); font-size:0.85rem;">Sin casos asociados</div>'}
+                
+                ${apis.length > 0 ? `
+                <div>
+                    <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px;">
+                        <span>APIs Funcionales</span>
+                        <span>${apis.length > 0 ? Math.round((apisCorrectas/apis.length)*100) : 0}%</span>
+                    </div>
+                    <div style="height:6px; background:var(--bg2); border-radius:3px; overflow:hidden;">
+                        <div style="width:${apis.length > 0 ? (apisCorrectas/apis.length)*100 : 0}%; height:100%; background:var(--accent2);"></div>
+                    </div>
+                    <div style="font-size:0.75rem; color:var(--text2); margin-top:4px;">
+                        ✅ ${apisCorrectas} correctas | ❌ ${apis.length - apisCorrectas} con error
+                    </div>
+                </div>` : '<div style="color:var(--text2); font-size:0.85rem;">Sin APIs asociadas</div>'}
+                
+                <button class="btn btn-outline btn-sm" style="margin-top:15px; width:100%;" 
+                        onclick="navigateTo('casos'); document.querySelector('.search-input').value='${req.id}'; searchTerm='${req.id}'; renderPage('casos');">
+                    🔍 Ver Casos de este Requisito
+                </button>
+            </div>`;
+        });
+        html += '</div>';
+        return html;
+    }
+
     function handleAction(page, action, id) {
         if (action === 'create') openModal(page);
         else if (action === 'edit') openModal(page, id);
@@ -755,7 +1027,7 @@
         }, true);
     }
     // ============ MODALS ============
-    function showConfirmModal(message, onConfirm, danger = false) {
+    function showConfirmModal(message, onConfirm, danger = false, showCancel = true) {
         const container = document.getElementById('modalContainer');
         const html = `
             <div class="modal-overlay">
@@ -763,20 +1035,26 @@
                 <div class="icon-warning"></div>
                 <p style="margin-bottom:20px; font-size:1rem; line-height:1.5; color:var(--text);">${message}</p>
                 <div class="modal-actions" style="justify-content:center;">
-                <button class="btn btn-outline" id="confirmCancelBtn">Cancelar</button>
+                ${showCancel ? `<button class="btn btn-outline" id="confirmCancelBtn">Cancelar</button>` : ''}
                 <button class="btn ${danger ? 'btn-danger' : 'btn-accent'}" id="confirmOkBtn">Confirmar</button>
                 </div>
             </div>
             </div>`;
         container.innerHTML = html;
-        document.getElementById('confirmCancelBtn').addEventListener('click', closeModal);
-        document.getElementById('confirmOkBtn').addEventListener('click', () => {
+        
+        const okBtn = document.getElementById('confirmOkBtn');
+        okBtn.addEventListener('click', () => {
             closeModal();
             if (onConfirm) onConfirm();
         });
+        
+        if (showCancel) {
+            const cancelBtn = document.getElementById('confirmCancelBtn');
+            cancelBtn.addEventListener('click', closeModal);
+        }
+        
         document.addEventListener('keydown', escCloseModal);
     }
-
     window.openModal = function (page, id, viewOnly = false) {
         const container = document.getElementById('modalContainer');
         let html = `<div class="modal-overlay"><div class="modal">
@@ -808,7 +1086,18 @@
         document.getElementById('modalContainer').innerHTML = '';
         document.removeEventListener('keydown', escCloseModal);
     };
-    function escCloseModal(e) { if (e.key === 'Escape') closeModal(); }
+
+    function escCloseModal(e) { 
+        if (e.key === 'Escape') {
+            // ✅ No permitir cerrar con ESC si es el modal de restricción de acceso
+            const container = document.getElementById('modalContainer');
+            if (container.innerHTML.includes('handleLogout()') && container.innerHTML.includes('Acceso Restringido')) {
+                return; // Bloquear cierre
+            }
+            closeModal(); 
+        } 
+    }
+
     function generateForm(page, id, viewOnly) {
         let item = id ? getArrayForPage(page).find(x => x.id == id) : null;
         const d = viewOnly ? 'disabled' : '';
@@ -933,6 +1222,18 @@
                 case 'casos':
                 h += `<div class="form-group"><label>ID Caso</label><input value="${item?.id || 'CASO-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
+                
+                <!-- NUEVO: Selector de Requisito -->
+                <div class="form-group">
+                    <label> Requisito Asociado</label>
+                    <select ${d} id="f_requisito">
+                        <option value="">Sin requisito...</option>
+                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r => 
+                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+                
                 <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad">
                 <option ${item?.prioridad === 'Crítica' ? 'selected' : ''}>Crítica</option>
                 <option ${item?.prioridad === 'Alta' ? 'selected' : ''}>Alta</option>
@@ -988,7 +1289,7 @@
                 }
                 break;
                 case 'ejecuciones':
-                const casosDisponibles = filterByProject(appData.casos);
+                const requisitosDisponibles = appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject());
                 const casosAsociados = item?.casosAsociados ? (() => {
                     try {
                         const parsed = JSON.parse(item.casosAsociados);
@@ -996,23 +1297,44 @@
                         return (item.casosAsociados || '').split(',').map(s => s.trim()).filter(Boolean);
                     } catch (e) { return []; }
                 })() : [];
+
                 h += `<div class="form-group"><label>ID Ejecución</label><input value="${item?.id || 'EJEC-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Nombre del Ciclo *</label><input value="${item?.nombreCiclo || ''}" ${d} id="f_nombreCiclo"></div>
                 <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
                 <div class="form-group"><label>Fecha</label><input type="date" value="${item?.fecha || ''}" ${d} id="f_fecha"></div>
                 <div class="form-group"><label>Responsable QA</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
-                <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>
-                <div class="form-group"><label>Casos Asociados</label>
-                <div class="checkbox-list">
-                ${casosDisponibles.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay casos disponibles</div>' :
-                casosDisponibles.map(c => `
-                        <label class="checkbox-item">
-                        <input type="checkbox" class="caso-check" value="${c.id}" ${casosAsociados.includes(c.id) ? 'checked' : ''}>
-                        <span><b>${c.id}</b> - ${c.titulo}</span>
-                        </label>
-                    `).join('')}
+
+                <!-- NUEVO: Selector de Requisito (GRUPO DE CASOS) -->
+                <div class="form-group">
+                    <label>📋 Requisito (Grupo de Casos)</label>
+                    <select ${d} id="f_requisito" onchange="cargarCasosDeRequisito()">
+                        <option value="">Seleccionar requisito...</option>
+                        ${requisitosDisponibles.map(r => 
+                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                        ).join('')}
+                    </select>
+                    <small style="color:var(--text2); display:block; margin-top:6px;">
+                        Al seleccionar un requisito, se incluirán automáticamente todos sus casos asociados
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>📝 Casos Incluidos (Automático)</label>
+                    <div class="checkbox-list" id="casosContainer" style="max-height:250px;">
+                        ${casosAsociados.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">Selecciona un requisito para cargar los casos</div>' :
+                        casosAsociados.map(cId => {
+                            const caso = appData.casos.find(c => c.id === cId);
+                            return caso ? `
+                                <label class="checkbox-item">
+                                    <input type="checkbox" class="caso-check" value="${cId}" checked disabled>
+                                    <span><b>${cId}</b> - ${caso.titulo}</span>
+                                </label>
+                            ` : '';
+                        }).join('')}
                     </div>
-                </div>`;
+                </div>
+
+                <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>`;
                 break;
                 case 'diario':
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'DIA-' + Date.now()}" ${d} id="f_id"></div>
@@ -1035,7 +1357,20 @@
                 break;
                 case 'apis':
                 h += `<div class="form-group"><label>ID API</label><input value="${item?.id || 'API-' + Date.now()}" ${d} id="f_id"></div>
-                    <div class="form-group"><label>Nombre API</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
+                <div class="form-group"><label>Nombre API</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
+
+                <!-- NUEVO: Selector de Requisito -->
+                <div class="form-group">
+                    <label>📋 Requisito Asociado</label>
+                    <select ${d} id="f_requisito">
+                        <option value="">Sin requisito...</option>
+                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r => 
+                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                        ).join('')}
+                    </select>
+                </div>
+
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
                     <div class="form-group"><label>Endpoint</label><input value="${item?.endpoint || ''}" ${d} id="f_endpoint"></div>
                     <div class="form-group"><label>Método</label><select ${d} id="f_metodo">
                     <option ${item?.metodo === 'GET' ? 'selected' : ''}>GET</option>
@@ -1043,24 +1378,144 @@
                     <option ${item?.metodo === 'PUT' ? 'selected' : ''}>PUT</option>
                     <option ${item?.metodo === 'DELETE' ? 'selected' : ''}>DELETE</option>
                     </select></div>
-                    <div class="form-group"><label>Request</label><textarea ${d} id="f_request">${item?.request || ''}</textarea></div>
-                    <div class="form-group"><label>Response esperada</label><textarea ${d} id="f_respEsperada">${item?.respEsperada || ''}</textarea></div>
-                    <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
-                    <option ${item?.estado === 'Correcta' ? 'selected' : ''}>Correcta</option>
-                    <option ${item?.estado === 'Error' ? 'selected' : ''}>Error</option>
-                    <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
-                    </select></div>
-                    `;
-                    if (id) {
-                        h += `<div id="commentsContainer_api_${id}"></div>`;
-                        setTimeout(() => {
-                            renderCommentsSection('api', id);
-                        }, 50);
-                    }
-                    break;
+                </div>
+                <div class="form-group"><label>Request (Body / Params)</label><textarea ${d} id="f_request" rows="3">${item?.request || ''}</textarea></div>
+                <div class="form-group"><label>Response Esperada (JSON)</label><textarea ${d} id="f_respEsperada" rows="3">${item?.respEsperada || ''}</textarea></div>
+                <hr style="border-color: var(--border); margin: 20px 0;">
+                <h4 style="color: var(--accent2); margin-bottom: 15px;">📝 Evidencia de Ejecución (Postman)</h4>
+                <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <div class="form-group">
+                        <label>Status Code Real</label>
+                        <input type="number" value="${item?.statusCode || ''}" ${d} id="f_statusCode" placeholder="Ej: 200, 404, 500">
+                    </div>
+                    <div class="form-group">
+                        <label>Tiempo de Respuesta (ms)</label>
+                        <input type="number" value="${item?.tiempoRespuesta || ''}" ${d} id="f_tiempoRespuesta" placeholder="Ej: 145">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>Response Real (Copiar desde Postman)</label>
+                    <textarea ${d} id="f_responseReal" rows="5" placeholder='Pega aquí el JSON de respuesta de Postman...'>${item?.responseReal || ''}</textarea>
+                </div>
+                <div class="form-group">
+                    <label>Fecha de Ejecución</label>
+                    <input type="datetime-local" value="${item?.fechaEjecucion ? new Date(item.fechaEjecucion).toISOString().slice(0, 16) : ''}" ${d} id="f_fechaEjecucion">
+                </div>
+                ${!viewOnly ? `<button type="button" class="btn btn-outline" onclick="validarEvidenciaApi()" style="width:100%; margin-top:10px; border-color: var(--accent2); color: var(--accent2);">🔄 Validar JSON y Actualizar Estado Automáticamente</button>` : ''}
+                <div class="form-group" style="margin-top:15px;"><label>Estado Final</label><select ${d} id="f_estado">
+                <option ${item?.estado === 'Correcta' ? 'selected' : ''}>Correcta</option>
+                <option ${item?.estado === 'Error' ? 'selected' : ''}>Error</option>
+                <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                </select></div>
+                `;
+                if (id) {
+                    h += `<div id="commentsContainer_api_${id}"></div>`;
+                    setTimeout(() => {
+                        renderCommentsSection('api', id);
+                    }, 50);
+                }
+                break;
+                case 'requisitos':
+                h += `<div class="form-group"><label>ID Requisito</label><input value="${item?.id || 'REQ-' + Date.now()}" ${d} id="f_id"></div>
+                <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
+                <div class="form-group"><label>Título del Requisito *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo" placeholder="Ej: RF-001: Gestión de Usuarios"></div>
+                <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion" rows="3" placeholder="Descripción detallada del requisito funcional...">${item?.descripcion || ''}</textarea></div>
+                <div class="form-group"><label>Tipo</label><select ${d} id="f_tipo">
+                    <option ${item?.tipo === 'Funcional' ? 'selected' : ''}>Funcional</option>
+                    <option ${item?.tipo === 'No Funcional' ? 'selected' : ''}>No Funcional</option>
+                    <option ${item?.tipo === 'Técnico' ? 'selected' : ''}>Técnico</option>
+                </select></div>
+                <div class="form-group"><label>Prioridad</label><select ${d} id="f_prioridad">
+                    <option ${item?.prioridad === 'Alta' ? 'selected' : ''}>Alta</option>
+                    <option ${item?.prioridad === 'Media' ? 'selected' : ''}>Media</option>
+                    <option ${item?.prioridad === 'Baja' ? 'selected' : ''}>Baja</option>
+                </select></div>
+                `;
+                break;
         }
         return h;
     }
+
+    // ✅ NUEVA FUNCIÓN: Cargar automáticamente los casos de un requisito
+    window.cargarCasosDeRequisito = function() {
+        const requisitoId = document.getElementById('f_requisito').value;
+        const container = document.getElementById('casosContainer');
+        
+        if (!requisitoId) {
+            container.innerHTML = '<div style="color:var(--text2); font-size:0.85rem;">Selecciona un requisito para cargar los casos</div>';
+            return;
+        }
+        
+        // Filtrar casos del proyecto activo que pertenezcan a este requisito
+        const casosDelRequisito = appData.casos.filter(c => 
+            c.requisito === requisitoId && 
+            (!getActiveProject() || c.proyecto === getActiveProject())
+        );
+        
+        if (casosDelRequisito.length === 0) {
+            container.innerHTML = '<div style="color:var(--warning); font-size:0.85rem;">⚠️ No hay casos asociados a este requisito</div>';
+            return;
+        }
+        
+        // Renderizar los casos como checkboxes (deshabilitados para evitar modificación manual)
+        container.innerHTML = casosDelRequisito.map(c => `
+            <label class="checkbox-item">
+                <input type="checkbox" class="caso-check" value="${c.id}" checked disabled>
+                <span><b>${c.id}</b> - ${c.titulo}</span>
+            </label>
+        `).join('');
+        
+        toast(`✅ Se han cargado ${casosDelRequisito.length} casos del requisito`, 'success');
+    };
+
+
+    // ============ VALIDADOR DE EVIDENCIAS API (POSTMAN) ============
+    window.validarEvidenciaApi = function() {
+        const esperadaStr = document.getElementById('f_respEsperada').value.trim();
+        const realStr = document.getElementById('f_responseReal').value.trim();
+        const statusInput = document.getElementById('f_statusCode');
+        const estadoSelect = document.getElementById('f_estado');
+
+        if (!realStr) return toast('Pega primero la respuesta real de Postman', 'warning');
+
+        try {
+            // Intentamos parsear ambos JSON
+            const esperada = esperadaStr ? JSON.parse(esperadaStr) : null;
+            const real = JSON.parse(realStr);
+
+            let esCorrecta = false;
+
+            if (!esperada) {
+                // Si no hay esperada, solo miramos el Status Code
+                esCorrecta = statusInput.value && parseInt(statusInput.value) < 400;
+            } else {
+                // Comparación profunda: verificamos si la respuesta real contiene al menos las claves y valores de la esperada
+                esCorrecta = Object.keys(esperada).every(key => {
+                    return JSON.stringify(esperada[key]) === JSON.stringify(real[key]);
+                });
+            }
+
+            if (esCorrecta) {
+                estadoSelect.value = 'Correcta';
+                toast('✅ Evidencia válida: La respuesta coincide con lo esperado', 'success');
+            } else {
+                estadoSelect.value = 'Error';
+                toast('❌ Evidencia inválida: La respuesta real difiere de la esperada', 'error');
+            }
+
+            // Override por Status Code si es evidente error de servidor
+            if (statusInput.value) {
+                const code = parseInt(statusInput.value);
+                if (code >= 500) {
+                    estadoSelect.value = 'Error';
+                    toast('⚠️ Status Code 5xx detectado. Marcado como Error.', 'warning');
+                }
+            }
+        } catch (e) {
+            toast('Error al parsear los JSON. Asegúrate de que el Response Real sea un JSON válido.', 'error');
+        }
+    };
+
     window.handleCapturaFiles = function (event) {
         const input = event.target;
         const preview = document.getElementById('archivosPreview');
@@ -1089,6 +1544,7 @@
             }
         }
     };
+
     window.saveModal = function (page, id) {
         const arr = getArrayForPage(page);
         const data = {};
@@ -1098,38 +1554,38 @@
             const fieldName = el.id.replace('f_', '');
             data[fieldName] = el.value;
         });
-
         if (!data.id) return (typeof showToast === 'function' ? showToast('ID requerido', 'error') : toast('ID requerido', 'error'));
-
         // 2. REQUERIMIENTO CLAVE: Vincular al proyecto activo 
-        const modulosConProyecto = ['casos', 'bugs', 'ejecuciones', 'capturas', 'diario', 'apis', 'objetivos', 'mejoras'];
+        const modulosConProyecto = ['casos', 'bugs', 'ejecuciones', 'capturas', 'diario', 'apis', 'objetivos', 'mejoras', 'requisitos'];
         if (modulosConProyecto.includes(page)) {
             data.proyecto = getActiveProject(); // <-- Aquí forzamos que se guarde en el proyecto actual 
         }
-
         // 3. Lógica Especial (Ejecuciones Xray y Capturas Base64) 
         if (page === 'ejecuciones') {
-            // CORREGIDO: Usar '.caso-check' en lugar de '.exec-case-cb'
-            const checked = Array.from(document.querySelectorAll('.caso-check:checked')).map(cb => cb.value);
-            let oldCases = [];
-            if (id) {
-                const existingItem = arr.find(x => x.id == id);
-                try { oldCases = JSON.parse(existingItem.casosAsociados || '[]'); } catch (e) { }
-            }
-            const newCasesData = checked.map(cId => {
-                const existing = oldCases.find(oc => oc.id === cId);
-                return { id: cId, status: existing ? existing.status : 'Pendiente' };
-            });
+            // Obtener el requisito seleccionado
+            const requisitoId = document.getElementById('f_requisito').value;
+            
+            // Obtener todos los casos del requisito (automáticamente)
+            const casosDelRequisito = appData.casos.filter(c => 
+                c.requisito === requisitoId && 
+                (!getActiveProject() || c.proyecto === getActiveProject())
+            );
+            
+            // Crear el array de casos asociados con estado "Pendiente"
+            const newCasesData = casosDelRequisito.map(c => ({
+                id: c.id,
+                status: 'Pendiente'
+            }));
+            
             data.casosAsociados = JSON.stringify(newCasesData);
+            data.requisito = requisitoId; // Guardar el requisito vinculado
         }
-
         if (page === 'capturas') {
             const base64Input = document.getElementById('f_archivos_base64');
             if (base64Input && base64Input.value) {
                 data.archivos = base64Input.value;
             }
         }
-
         if (page === 'usuarios') {
             const roleSelect = document.getElementById('f_rol');
             if (roleSelect && roleSelect.value === 'Consultor') {
@@ -1139,31 +1595,30 @@
                 data.proyectosAutorizados = [];
             }
         }
-
         // Marcar quién crea el registro (aislamiento de consultores)
         if (!id) {
             // Solo en creación nueva, no al editar
             data.creadoPor = currentUser.id;
         }
-
         // 4. Guardar o Actualizar Array 
         if (id) {
             const idx = arr.findIndex(x => x.id == id);
             if (idx >= 0) arr[idx] = { ...arr[idx], ...data };
         } else {
             arr.push(data);
-            if (page === 'proyectos') populateProjectSelector();
+            if (page === 'proyectos' || page === 'requisitos') populateProjectSelector();
         }
-
         saveData();
         closeModal();
         renderPage(currentPage);
         if (typeof showToast === 'function') showToast('Guardado correctamente', 'success');
         else if (typeof toast === 'function') toast('Guardado correctamente', 'success');
     };
+
     function getArrayForPage(p) {
         return {
             proyectos: appData.proyectos,
+            requisitos: appData.requisitos,
             usuarios: appData.usuarios,
             casos: appData.casos,
             bugs: appData.bugs,
@@ -1291,13 +1746,20 @@
         const ap = getActiveProject();
         if (!arr || !Array.isArray(arr)) return [];
         let result = arr;
-        if (ap) result = result.filter(i => (i[key] || i.proyecto) === ap);
-        // Admin ve TODO, consultor solo lo suyo
+
+        // 1. Si es consultor, filtrar estrictamente por proyectos autorizados
         if (currentUser && currentUser.rol === 'Consultor') {
-            result = result.filter(i => i.creadoPor === currentUser.id);
+            const authProjects = currentUser.proyectosAutorizados || [];
+            if (authProjects.length === 0) return [];
+            result = result.filter(i => authProjects.includes(i.proyecto));
         }
+
+        // 2. Filtrar por proyecto activo
+        if (ap) result = result.filter(i => (i[key] || i.proyecto) === ap);
+
         return result;
     }
+
 // ============ DASHBOARD ============
     function renderDashboard() {
         const casos = getVisibleData(appData.casos);
@@ -1470,10 +1932,25 @@ ${renderDonutChart('Severidad Bugs', [
     }
     function renderCasos() {
         const data = filterByProject(appData.casos);
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Título', field: 'titulo' }, { label: 'Prioridad', field: 'prioridad' }, { label: 'Actor', field: 'actor' }, { label: 'Estado', field: 'estado' }];
-        return '<h1 class="page-title">📋 Casos de Uso</h1>' + renderTable('casos', cols, data, i =>
-            `<td><code>${i.id}</code></td><td><b>${i.titulo || ''}</b></td><td><span class="badge ${i.prioridad === 'Crítica' ? 'badge-danger' : i.prioridad === 'Alta' ? 'badge-warning' : 'badge-info'}">${i.prioridad || 'Media'}</span></td><td>${i.actor || '-'}</td><td><span class="badge ${i.estado === 'Pasado' ? 'badge-success' : i.estado === 'Fallido' ? 'badge-danger' : 'badge-neutral'}">${i.estado || 'Pendiente'}</span></td>`
-        );
+        const cols = [
+            { label: 'ID', field: 'id' }, 
+            { label: 'Requisito', field: 'requisito' },
+            { label: 'Título', field: 'titulo' }, 
+            { label: 'Prioridad', field: 'prioridad' }, 
+            { label: 'Actor', field: 'actor' }, 
+            { label: 'Estado', field: 'estado' }
+        ];
+        
+        return '<h1 class="page-title">📋 Casos de Uso</h1>' + 
+        renderTable('casos', cols, data, i => {
+            const req = appData.requisitos.find(r => r.id === i.requisito);
+            return `<td><code>${i.id}</code></td>
+                    <td>${req ? `<span class="badge badge-purple" title="${req.titulo}">${i.requisito}</span>` : '<span style="color:var(--text2);">-</span>'}</td>
+                    <td><b>${i.titulo || ''}</b></td>
+                    <td><span class="badge ${i.prioridad === 'Crítica' ? 'badge-danger' : i.prioridad === 'Alta' ? 'badge-warning' : 'badge-info'}">${i.prioridad || 'Media'}</span></td>
+                    <td>${i.actor || '-'}</td>
+                    <td><span class="badge ${i.estado === 'Pasado' ? 'badge-success' : i.estado === 'Fallido' ? 'badge-danger' : 'badge-neutral'}">${i.estado || 'Pendiente'}</span></td>`;
+        });
     }
     function renderDiario() {
         // Ahora filtramos por el proyecto activo
@@ -1495,12 +1972,37 @@ ${renderDonutChart('Severidad Bugs', [
             return `<td>${i.id}</td><td><b>${i.descripcion || '-'}</b></td><td><span class="badge badge-info">${i.vinculo || '-'}</span></td><td>${imgHtml}</td>`;
         });
     }
+
     function renderApis() {
         const data = filterByProject(appData.apis);
-        const cols = [{ label: 'ID' }, { label: 'Nombre' }, { label: 'Endpoint' }, { label: 'Método' }, { label: 'Estado' }];
-        return '<h1 class="page-title">🔌 APIs</h1>' +
-            renderTable('apis', cols, data, i => `<td>${i.id}</td><td>${i.nombre || '-'}</td><td>${i.endpoint || '-'}</td><td>${i.metodo || 'GET'}</td><td><span class="badge ${i.estado === 'Correcta' ? 'badge-success' : i.estado === 'Error' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
+        const cols = [
+            { label: 'ID' }, 
+            { label: 'Requisito' },
+            { label: 'Nombre' }, 
+            { label: 'Endpoint' }, 
+            { label: 'Método' }, 
+            { label: 'Status' }, 
+            { label: 'Latencia' }, 
+            { label: 'Estado' }
+        ];
+        
+        return '<h1 class="page-title">🔌 APIs (Evidencias Postman)</h1>' +
+        renderTable('apis', cols, data, i => {
+            const req = appData.requisitos.find(r => r.id === i.requisito);
+            const statusBadge = i.statusCode ? `<span class="badge ${i.statusCode < 400 ? 'badge-success' : 'badge-danger'}">${i.statusCode}</span>` : '<span style="color:var(--text2);">-</span>';
+            const latency = i.tiempoRespuesta ? `<span style="font-weight:600; color:${i.tiempoRespuesta < 500 ? 'var(--success)' : 'var(--warning)'};">${i.tiempoRespuesta} ms</span>` : '-';
+            
+            return `<td><code>${i.id}</code></td>
+                    <td>${req ? `<span class="badge badge-purple" title="${req.titulo}">${i.requisito}</span>` : '<span style="color:var(--text2);">-</span>'}</td>
+                    <td><b>${i.nombre || '-'}</b></td>
+                    <td style="font-family:monospace; font-size:0.8rem; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${i.endpoint || '-'}</td>
+                    <td><span class="badge badge-info">${i.metodo || 'GET'}</span></td>
+                    <td>${statusBadge}</td>
+                    <td>${latency}</td>
+                    <td><span class="badge ${i.estado === 'Correcta' ? 'badge-success' : i.estado === 'Error' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`;
+        });
     }
+
     function renderTrazabilidad() {
         const cols = [{ label: 'Fecha', field: 'fechaHora' }, { label: 'Usuario', field: 'usuario' }, { label: 'Proyecto', field: 'proyecto' }, { label: 'Evento', field: 'tipoEvento' }, { label: 'Descripción', field: 'descripcion' }, { label: 'Entidad', field: 'entidadAfectada' }];
         return '<h1 class="page-title">🔍 Trazabilidad</h1>' + '<button class="btn" style="background: var(--danger);" onclick="clearLogs()">🗑️ Limpiar Historial</button>' + renderTable('trazabilidad', cols, appData.trazabilidad.slice().reverse(), i =>
@@ -1566,6 +2068,7 @@ ${renderDonutChart('Severidad Bugs', [
                     <div class="xray-plan-title">
                         <span class="badge badge-info">📝 ${tp.id}</span>
                         ${tp.nombreCiclo}
+                        ${tp.requisito ? `<span class="badge badge-purple" style="margin-left:10px;"> ${tp.requisito}</span>` : ''}
                     </div>
                     <div class="xray-plan-meta">
                         <span>📅 ${tp.fecha || 'Sin fecha'}</span>
@@ -1573,9 +2076,14 @@ ${renderDonutChart('Severidad Bugs', [
                         <span>📋 ${casos.length} casos</span>
                     </div>
                     </div>
-                    <div class="actions-cell">
-                    <button data-action="edit" data-id="${tp.id}" title="Editar">✏️</button>
-                    <button data-action="delete" data-id="${tp.id}" title="Eliminar">️🗑️</button>
+                    <div class="actions-cell" style="gap: 8px; align-items: center;">
+                        <button data-action="edit" data-id="${tp.id}" title="Editar">✏️</button>
+                        <button data-action="delete" data-id="${tp.id}" title="Eliminar">🗑️</button>
+                        ${tp.estadoCiclo === 'Firmado' 
+                            ? `<span class="badge badge-success" style="font-size:0.7rem; padding:4px 8px;">✅ Firmado</span>
+                            <button class="btn btn-sm btn-outline" onclick="generarCertificadoPDF('${tp.id}')" title="Ver/Descargar Certificado">📄</button>`
+                            : `<button class="btn btn-sm btn-accent" onclick="abrirModalFirma('${tp.id}')" title="Firmar y Aprobar Release">✍️ Firmar</button>`
+                        }
                     </div>
                 </div>
                 <div class="xray-progress">
@@ -1643,6 +2151,235 @@ ${renderDonutChart('Severidad Bugs', [
         html += '</div>';
         return html;
     }
+
+    // ============ FIRMA DIGITAL Y CERTIFICADO PDF ============
+    window.abrirModalFirma = function(execId) {
+        const exec = appData.ejecuciones.find(e => e.id === execId);
+        if (!exec) return;
+        
+        const container = document.getElementById('modalContainer');
+        const html = `
+            <div class="modal-overlay">
+                <div class="modal" style="max-width: 500px;">
+                    <h3>✍️ Firma Digital de Ciclo de Pruebas</h3>
+                    <p style="color:var(--text2); font-size:0.9rem; margin-bottom:20px;">
+                        Al firmar este ciclo, certificas que las pruebas han sido completadas y apruebas el paso a producción (Release) del proyecto.
+                    </p>
+                    <div class="form-group">
+                        <label>Nombre del QA Lead (Firmante)</label>
+                        <input type="text" id="firma_nombre" value="${currentUser.nombre}" readonly style="background:var(--bg2);">
+                    </div>
+                    <div class="form-group">
+                        <label>Fecha de Aprobación</label>
+                        <input type="text" id="firma_fecha" value="${new Date().toLocaleString('es-ES')}" readonly style="background:var(--bg2);">
+                    </div>
+                    <div class="form-group">
+                        <label>Comentario / Observaciones de Release</label>
+                        <textarea id="firma_comentario" rows="3" placeholder="Ej: Aprobado para release v1.2. Sin bugs bloqueantes."></textarea>
+                    </div>
+                    <div class="form-group">
+                        <label>🔐 Confirmar con Contraseña (Seguridad)</label>
+                        <input type="password" id="firma_pass" placeholder="Ingresa tu contraseña para firmar">
+                    </div>
+                    <div class="modal-actions">
+                        <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+                        <button class="btn btn-accent" onclick="confirmarFirma('${execId}')">✍️ Firmar y Generar PDF</button>
+                    </div>
+                </div>
+            </div>
+        `;
+        container.innerHTML = html;
+    };
+
+    window.confirmarFirma = function(execId) {
+        const pass = document.getElementById('firma_pass').value;
+        if (pass !== currentUser.password) {
+            return toast('Contraseña incorrecta. La firma digital requiere autenticación.', 'error');
+        }
+        
+        const nombre = document.getElementById('firma_nombre').value;
+        const comentario = document.getElementById('firma_comentario').value;
+
+        const exec = appData.ejecuciones.find(e => e.id === execId);
+        if (exec) {
+            // Guardamos el estado de firma en el objeto
+            exec.estadoCiclo = 'Firmado';
+            exec.aprobadoPor = nombre;
+            exec.fechaAprobacion = new Date().toISOString();
+            exec.comentarioAprobacion = comentario;
+            
+            saveData();
+            closeModal();
+            renderPage(currentPage);
+            toast('Ciclo firmado correctamente. Generando certificado...', 'success');
+            
+            // Generamos el PDF inmediatamente
+            generarCertificadoPDF(execId);
+        }
+    };
+
+    window.generarCertificadoPDF = function(execId) {
+        const exec = appData.ejecuciones.find(e => e.id === execId);
+        if (!exec) return toast('Ejecución no encontrada', 'error');
+        
+        const proyecto = appData.proyectos.find(p => p.id === exec.proyecto) || { nombre: 'General', codigoCliente: 'N/A' };
+        
+        // ✅ CORRECCIÓN: Parseo seguro para evitar que la función colapse
+        let casos = [];
+        try {
+            casos = typeof exec.casosAsociados === 'string' ? JSON.parse(exec.casosAsociados) : (exec.casosAsociados || []);
+        } catch (e) {
+            console.warn("Error al parsear casosAsociados", e);
+            casos = [];
+        }
+
+        const totalCasos = casos.length;
+        const pasados = casos.filter(c => c.status === 'Passed').length;
+        const fallidos = casos.filter(c => c.status === 'Failed').length;
+        const cobertura = totalCasos > 0 ? Math.round((pasados / totalCasos) * 100) : 0;
+        const hashCert = btoa(exec.id + (exec.fechaAprobacion || Date.now())).substring(0, 16); 
+
+        const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="UTF-8">
+            <title>Certificado de Calidad - ${exec.nombreCiclo}</title>
+            <style>
+                @page { size: A4; margin: 0; }
+                body { font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; background: #f8fafc; color: #0f172a; margin: 0; padding: 0; }
+                .certificate { width: 210mm; min-height: 297mm; background: #fff; padding: 40px; box-sizing: border-box; position: relative; }
+                .border-inner { border: 2px solid #3b82f6; padding: 30px; height: 100%; box-sizing: border-box; }
+                .header { text-align: center; border-bottom: 3px solid #3b82f6; padding-bottom: 20px; margin-bottom: 30px; }
+                .logo { font-size: 48px; margin-bottom: 10px; }
+                h1 { font-size: 32px; color: #1e40af; margin: 0; text-transform: uppercase; letter-spacing: 2px; }
+                h2 { font-size: 18px; color: #64748b; margin: 5px 0 0 0; font-weight: 400; }
+                .content { margin-top: 40px; line-height: 1.6; font-size: 14px; }
+                .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 30px 0; }
+                .detail-box { background: #f1f5f9; padding: 15px; border-radius: 8px; border-left: 4px solid #3b82f6; }
+                .detail-label { font-size: 11px; color: #64748b; text-transform: uppercase; font-weight: 700; }
+                .detail-value { font-size: 16px; font-weight: 600; color: #0f172a; margin-top: 4px; }
+                .metrics { display: flex; justify-content: space-around; margin: 40px 0; text-align: center; }
+                .metric { padding: 20px; }
+                .metric-value { font-size: 36px; font-weight: 800; color: #10b981; }
+                .metric-value.failed { color: #ef4444; }
+                .metric-label { font-size: 12px; color: #64748b; text-transform: uppercase; margin-top: 5px; }
+                .statement { background: #eff6ff; padding: 20px; border-radius: 8px; margin: 30px 0; font-style: italic; color: #1e40af; text-align: center; font-size: 16px; border: 1px dashed #93c5fd; }
+                .signature-area { margin-top: 60px; display: flex; justify-content: space-between; align-items: flex-end; }
+                .signature-box { text-align: center; width: 40%; }
+                .signature-line { border-top: 2px solid #0f172a; margin-bottom: 10px; }
+                .signature-name { font-weight: 700; font-size: 16px; }
+                .signature-role { font-size: 12px; color: #64748b; }
+                .seal { position: absolute; bottom: 100px; right: 80px; width: 120px; height: 120px; border: 4px double #10b981; border-radius: 50%; display: flex; flex-direction: column; align-items: center; justify-content: center; transform: rotate(-15deg); opacity: 0.8; background: rgba(16, 185, 129, 0.05); }
+                .seal-text { font-size: 14px; font-weight: 800; color: #10b981; text-transform: uppercase; }
+                .seal-date { font-size: 10px; color: #64748b; margin-top: 5px; text-align: center; }
+                .footer { position: absolute; bottom: 30px; left: 40px; right: 40px; text-align: center; font-size: 10px; color: #94a3b8; border-top: 1px solid #e2e8f0; padding-top: 10px; }
+                @media print {
+                    body { background: #fff; }
+                    .no-print { display: none; }
+                }
+            </style>
+        </head>
+        <body>
+            <div class="no-print" style="background: #fef3c7; padding: 15px; text-align: center; font-family: sans-serif; color: #92400e; border-bottom: 2px solid #f59e0b;">
+                🖨️ <strong>Selecciona "Guardar como PDF"</strong> en la ventana de impresión de tu navegador y elige dónde guardarlo.
+            </div>
+            <div class="certificate">
+                <div class="border-inner">
+                    <div class="header">
+                        <div class="logo">🛡️</div>
+                        <h1>Certificado de Calidad</h1>
+                        <h2>Quality Assurance / Release Approval</h2>
+                    </div>
+                    <div class="content">
+                        <p>Por medio del presente documento, se certifica que el ciclo de pruebas de aseguramiento de calidad (QA) correspondiente al proyecto <strong>${proyecto.nombre}</strong> ha sido ejecutado, validado y aprobado según los estándares de calidad establecidos.</p>
+                        
+                        <div class="details-grid">
+                            <div class="detail-box">
+                                <div class="detail-label">Proyecto</div>
+                                <div class="detail-value">${proyecto.nombre}</div>
+                            </div>
+                            <div class="detail-box">
+                                <div class="detail-label">Cliente</div>
+                                <div class="detail-value">${proyecto.codigoCliente || 'N/A'}</div>
+                            </div>
+                            <div class="detail-box">
+                                <div class="detail-label">Ciclo de Pruebas</div>
+                                <div class="detail-value">${exec.nombreCiclo}</div>
+                            </div>
+                            <div class="detail-box">
+                                <div class="detail-label">Fecha de Emisión</div>
+                                <div class="detail-value">${exec.fechaAprobacion ? new Date(exec.fechaAprobacion).toLocaleString('es-ES') : 'N/A'}</div>
+                            </div>
+                        </div>
+
+                        <div class="metrics">
+                            <div class="metric">
+                                <div class="metric-value">${totalCasos}</div>
+                                <div class="metric-label">Casos Evaluados</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${pasados}</div>
+                                <div class="metric-label">Casos Exitosos</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value failed">${fallidos}</div>
+                                <div class="metric-label">Casos Fallidos</div>
+                            </div>
+                            <div class="metric">
+                                <div class="metric-value">${cobertura}%</div>
+                                <div class="metric-label">Tasa de Éxito</div>
+                            </div>
+                        </div>
+
+                        <div class="statement">
+                            "Se declara que el software ha superado las pruebas de calidad y es apto para su despliegue en el entorno de producción, salvo las observaciones detalladas en el informe de bugs."
+                        </div>
+
+                        <p><strong>Observaciones de Release:</strong><br>${exec.comentarioAprobacion || 'Sin observaciones adicionales. Aprobación estándar.'}</p>
+
+                        <div class="signature-area">
+                            <div class="signature-box">
+                                <div class="signature-line"></div>
+                                <div class="signature-name">${exec.aprobadoPor || 'N/A'}</div>
+                                <div class="signature-role">QA Lead / Release Manager</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="seal">
+                        <div class="seal-text">QA<br>Aprobado</div>
+                        <div class="seal-date">${exec.fechaAprobacion ? new Date(exec.fechaAprobacion).toLocaleDateString('es-ES') : ''}</div>
+                    </div>
+                    <div class="footer">
+                        Certificado generado electrónicamente por QA Suite PRO · ID Ciclo: ${exec.id} · Hash: ${hashCert}
+                    </div>
+                </div>
+            </div>
+        </body>
+        </html>
+        `;
+
+        // ✅ NUEVA ESTRATEGIA: Usar nueva pestaña (100% compatible, evita bloqueos de iframes)
+        const printWindow = window.open('', '_blank');
+        
+        if (!printWindow) {
+            return toast('⚠️ El navegador bloqueó la ventana emergente. Por favor, permítela para generar el PDF.', 'warning');
+        }
+
+        printWindow.document.write(htmlContent);
+        printWindow.document.close();
+        printWindow.focus();
+
+        // Esperamos medio segundo a que el navegador renderice el CSS antes de lanzar la impresión
+        setTimeout(() => {
+            try {
+                printWindow.print();
+            } catch (e) {
+                console.error("Error al imprimir:", e);
+                toast('Usa Ctrl+P (o Cmd+P) en la nueva pestaña para guardar el PDF.', 'info');
+            }
+        }, 500);
+    };
 
     window.showCaseDetail = function (caseId, execId) {
         const caseRef = appData.casos.find(c => c.id === caseId);
@@ -1864,6 +2601,7 @@ ${renderDonutChart('Severidad Bugs', [
         container.innerHTML = html;
         document.addEventListener('keydown', escCloseModal);
     };
+
 
     // Función para guardar el bug creado desde ejecución
     window.saveBugFromExecution = function (bugId, caseId, execId, status) {
@@ -2726,6 +3464,7 @@ ${renderDonutChart('Severidad Bugs', [
         // Preparar datos para Excel
         const data = casos.map(c => ({
             'ID': c.id,
+            'Requisito': c.requisito || '',
             'Título': c.titulo || '',
             'Prioridad': c.prioridad || 'Media',
             'Actor': c.actor || '',
@@ -2967,14 +3706,15 @@ ${renderDonutChart('Severidad Bugs', [
             </div>
         </div>
         
-        <h1 class="section">2. Detalle de APIs</h1>
+        <h1 class="section">2. Detalle de APIs y Evidencias</h1>
         <table>
-            <tr><th>ID API</th><th>Nombre</th><th>Método</th><th>Endpoint</th><th>Estado</th></tr>
+            <tr><th>ID API</th><th>Nombre</th><th>Método</th><th>Status</th><th>Tiempo</th><th>Estado</th></tr>
             ${apis.map(a => `<tr>
             <td>${a.id}</td>
             <td>${a.nombre || ''}</td>
             <td><strong>${a.metodo || 'GET'}</strong></td>
-            <td>${a.endpoint || '-'}</td>
+            <td>${a.statusCode || 'N/A'}</td>
+            <td>${a.tiempoRespuesta ? a.tiempoRespuesta + ' ms' : 'N/A'}</td>
             <td><span class="badge ${a.estado === 'Correcta' ? 'passed' : a.estado === 'Error' ? 'failed' : 'pending'}">${a.estado || 'Pendiente'}</span></td>
             </tr>`).join('')}
         </table>
@@ -3227,7 +3967,6 @@ ${renderDonutChart('Severidad Bugs', [
         });
         if (needsSave) await saveData();
     }
-
 
     init();
 })();
