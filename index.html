@@ -53,11 +53,11 @@
                         <input type="password" id="regPass2">
                     </div>
                     <div class="form-group">
-                        <label>Rol</label>
-                        <select id="regRole" class="role-select">
-                            <option>Admin</option>
-                            <option>Consultor</option>
-                        </select>
+                        <label>Rol asignado</label>
+                        <input type="text" value="Consultor (Pendiente de revisión)" disabled style="background: var(--input-bg); color: var(--text2); cursor: not-allowed; opacity: 0.8;">
+                        <small style="color: var(--text2); font-size: 0.75rem; margin-top: 6px; display: block; line-height: 1.4;">
+                            ℹ️ Tu cuenta se creará con rol de Consultor. Un administrador deberá confirmar tu rol y asignar tus proyectos desde la app.
+                        </small>
                     </div>
                     <button class="btn btn-accent" onclick="doRegister()">Registrarse</button>
                     <div class="auth-toggle">¿Ya tienes cuenta? <b onclick="showLogin()">Iniciar sesión</b></div>
@@ -89,6 +89,9 @@
                     </div>
 
                     <div class="header-right">
+                        <button class="icon-btn" onclick="navigateTo('manual')" title="Manual de Usuario">
+                            📖
+                        </button>
                         <button class="icon-btn" onclick="navigateTo('ajustes')" title="Atajos: Ctrl+K">
                             🔍
                         </button>
@@ -110,6 +113,7 @@
                             <div class="dropdown-menu" id="userMenu">
                                 <a href="#" onclick="openProfile(); return false;"> Mi Perfil</a>
                                 <a href="#" onclick="navigateTo('ajustes'); return false;">️ Ajustes</a>
+                                <a href="#" onclick="navigateTo('manual'); return false;">📖 Manual de Usuario</a>
                                 <div class="divider"></div>
                                 <a href="#" class="danger" onclick="handleLogout(); return false;">🚪 Cerrar Sesión</a>
                             </div>
