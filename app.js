@@ -1,10 +1,10 @@
 (function () {
     const SESSION_KEY = 'qaqc_current_user_id', PAGE_KEY = 'qaqc_last_page';
-    const SERVER_PAGE_SIZE = 50; 
+    const SERVER_PAGE_SIZE = 50;
     let appData = {
         usuarios: [], proyectos: [], objetivos: [], casos: [], bugs: [],
         ejecuciones: [], capturas: [], registroDiario: [], apis: [], mejoras: [],
-        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' }, 
+        trazabilidad: [], configuracion: { theme: 'dark', activeProject: '' },
         comentarios: [], requisitos: []
     };
     let currentUser = null, currentPage = 'dashboard', sortConfig = { field: null, dir: 'asc' };
@@ -16,14 +16,14 @@
     let loadedCollections = new Set();
     let activeSubscriptions = {};
 
-    const projectRequiredPages = ['casos', 'bugs', 'ejecuciones', 'diario', 'capturas', 'apis', 'trazabilidad', 'informes', 'historico', 'mejoras', 'objetivos'];
-    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario', 'manual', 'requisitos', 'mejoras', 'Dashboard', 'objetivos'];
+    const projectRequiredPages = ['casos', 'bugs', 'ejecuciones', 'diario', 'capturas', 'apis', 'trazabilidad', 'informes', 'historico', 'mejoras', 'objetivos', 'ia'];
+    const consultorPages = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'diario', 'manual', 'requisitos', 'mejoras', 'Dashboard', 'objetivos', 'ia'];
 
     const cache = {
         data: {},
         timestamps: {},
         ttl: 60000, // 60 segundos de vida útil
-        
+
         get(key) {
             const now = Date.now();
             if (this.timestamps[key] && (now - this.timestamps[key]) < this.ttl) {
@@ -31,22 +31,22 @@
             }
             return null; // Cache expirado
         },
-        
+
         set(key, value) {
             this.data[key] = value;
             this.timestamps[key] = Date.now();
         },
-        
+
         invalidate(key) {
             delete this.data[key];
             delete this.timestamps[key];
         },
-        
+
         invalidateAll() {
             this.data = {};
             this.timestamps = {};
         },
-        
+
         invalidateByPrefix(prefix) {
             Object.keys(this.data).forEach(key => {
                 if (key.startsWith(prefix)) {
@@ -89,12 +89,12 @@
     // Suscripción selectiva en tiempo real
     function suscribirseAlTiempoReal() {
         if (!db) return;
-        
+
         // Suscribirse al nodo principal donde se guardan todos los datos
         db.ref("qa_suite_pro_state").on("value", (snapshot) => {
             if (snapshot.exists()) {
                 const data = snapshot.val();
-                
+
                 // Solo actualizar si hay datos válidos
                 if (data && typeof data === 'object') {
                     // Preservar datos existentes si la respuesta está incompleta
@@ -114,23 +114,24 @@
                         notificaciones: Array.isArray(data.notificaciones) ? data.notificaciones : [],
                         configuracion: data.configuracion || { theme: 'dark', activeProject: '' },
                         requisitos: Array.isArray(data.requisitos) ? data.requisitos : (appData.requisitos || []),
+                        ia: Array.isArray(data.ia) ? data.ia : (appData.ia || []),
                     };
-                    
+
                     notifications = appData.notificaciones || [];
-                    
+
                     // Actualizar UI si está visible
                     if (currentUser && document.getElementById('appScreen').style.display !== 'none') {
                         renderPage(currentPage);
                         updateNotificationBadge();
                         populateProjectSelector();
                     }
-                    
+
                     console.log("🔄 Datos sincronizados desde Firebase");
                 }
             }
             // Si no existe el snapshot, NO hacer nada (no sobrescribir con vacío)
         });
-        
+
         console.log("✅ Suscripción activada para 'qa_suite_pro_state'");
     }
 
@@ -147,7 +148,7 @@
         } catch (e) {
             console.error("Error al cargar de Firebase:", e);
         }
-        
+
         // Asegurar estructura mínima
         if (!Array.isArray(appData.trazabilidad)) appData.trazabilidad = [];
         if (!Array.isArray(appData.mejoras)) appData.mejoras = [];
@@ -164,7 +165,7 @@
         if (!Array.isArray(appData.comentarios)) appData.comentarios = [];
         if (!appData.configuracion) appData.configuracion = { theme: 'dark', activeProject: '' };
         if (!Array.isArray(appData.requisitos)) appData.requisitos = [];
-        
+
         notifications = appData.notificaciones || [];
         applyTheme();
     }
@@ -213,6 +214,942 @@
         }
         return false;
     }
+
+
+    // ============ MÓDULO IA & MACHINE LEARNING ============
+
+    // Algoritmo de similitud de texto (Levenshtein Distance)
+    function calcularSimilitud(texto1, texto2) {
+        if (!texto1 || !texto2) return 0;
+        const t1 = texto1.toLowerCase().trim();
+        const t2 = texto2.toLowerCase().trim();
+        
+        if (t1 === t2) return 100;
+        if (t1.length === 0 || t2.length === 0) return 0;
+        
+        const matrix = [];
+        for (let i = 0; i <= t1.length; i++) {
+            matrix[i] = [i];
+        }
+        for (let j = 0; j <= t2.length; j++) {
+            matrix[0][j] = j;
+        }
+        
+        for (let i = 1; i <= t1.length; i++) {
+            for (let j = 1; j <= t2.length; j++) {
+                const cost = t1[i - 1] === t2[j - 1] ? 0 : 1;
+                matrix[i][j] = Math.min(
+                    matrix[i - 1][j] + 1,
+                    matrix[i][j - 1] + 1,
+                    matrix[i - 1][j - 1] + cost
+                );
+            }
+        }
+        
+        const distancia = matrix[t1.length][t2.length];
+        const maxLen = Math.max(t1.length, t2.length);
+        return Math.round(((maxLen - distancia) / maxLen) * 100);
+    }
+
+    // Detección de bugs duplicados
+    function detectarBugsDuplicados(bugNuevo, bugsExistentes, umbral = 70) {
+        const duplicados = [];
+        
+        bugsExistentes.forEach(bug => {
+            const similitudTitulo = calcularSimilitud(bugNuevo.titulo, bug.titulo);
+            const similitudDesc = calcularSimilitud(bugNuevo.descripcion || '', bug.descripcion || '');
+            const similitudResumen = calcularSimilitud(bugNuevo.resumen || '', bug.resumen || '');
+            
+            const similitudTotal = (similitudTitulo * 0.5) + (similitudDesc * 0.3) + (similitudResumen * 0.2);
+            
+            if (similitudTotal >= umbral) {
+                duplicados.push({
+                    bug: bug,
+                    similitud: Math.round(similitudTotal),
+                    detalles: { titulo: similitudTitulo, descripcion: similitudDesc, resumen: similitudResumen }
+                });
+            }
+        });
+        
+        duplicados.sort((a, b) => b.similitud - a.similitud);
+        return duplicados;
+    }
+
+    // Clasificación automática de severidad
+    function clasificarSeveridadAutomatica(titulo, descripcion, resumen) {
+        const textoCompleto = `${titulo} ${descripcion || ''} ${resumen || ''}`.toLowerCase();
+        
+        const patrones = {
+            'Bloqueante': ['bloqueo', 'bloquea', 'crash', 'caída', 'caida', 'no funciona', 'imposible', 'no se puede', 'error crítico', 'pantalla blanca', 'no carga', 'no abre', 'no inicia', 'sistema caído', 'down', 'data loss', 'pérdida de datos', 'corrupción'],
+            'Crítica': ['crítico', 'critico', 'grave', 'urgente', 'no se puede continuar', 'funcionalidad principal', 'login', 'autenticación', 'pagos', 'transacción', 'seguridad', 'vulnerabilidad'],
+            'Mayor': ['error', 'fallo', 'incorrecto', 'no muestra', 'no actualiza', 'lento', 'rendimiento', 'timeout', 'no responde', 'mala experiencia', 'usabilidad'],
+            'Menor': ['typo', 'ortografía', 'color', 'estilo', 'css', 'diseño', 'alineación', 'margen', 'icono', 'mejora', 'sugerencia', 'opcional', 'cosmético', 'visual']
+        };
+        
+        const puntuaciones = {};
+        Object.keys(patrones).forEach(severidad => {
+            puntuaciones[severidad] = 0;
+            patrones[severidad].forEach(palabra => {
+                if (textoCompleto.includes(palabra)) puntuaciones[severidad] += 1;
+            });
+        });
+        
+        let severidadDetectada = 'Menor';
+        let maxPuntuacion = 0;
+        
+        Object.keys(puntuaciones).forEach(severidad => {
+            if (puntuaciones[severidad] > maxPuntuacion) {
+                maxPuntuacion = puntuaciones[severidad];
+                severidadDetectada = severidad;
+            }
+        });
+        
+        if (maxPuntuacion === 0) {
+            if (/(no\s+\w+ar|no\s+puede|no\s+funciona)/i.test(textoCompleto)) severidadDetectada = 'Mayor';
+            if (textoCompleto.length < 30) severidadDetectada = 'Menor';
+        }
+        
+        return {
+            severidad: severidadDetectada,
+            confianza: Math.min(maxPuntuacion * 25, 95),
+            palabrasClave: patrones[severidadDetectada].filter(p => textoCompleto.includes(p))
+        };
+    }
+
+    // Predicción de defectos basada en histórico
+    function predecirDefectos(casos, bugs, ejecuciones) {
+        const analisis = { modulosAltoRiesgo: [], tendenciaDefectos: 0, prediccionProximoCiclo: 0, factoresRiesgo: [] };
+        
+        const bugsPorModulo = {};
+        bugs.forEach(bug => {
+            const modulo = bug.casoRelacionado || 'Sin módulo';
+            if (!bugsPorModulo[modulo]) bugsPorModulo[modulo] = { total: 0, criticos: 0 };
+            bugsPorModulo[modulo].total++;
+            if (bug.severidad === 'Bloqueante' || bug.severidad === 'Crítica') bugsPorModulo[modulo].criticos++;
+        });
+        
+        Object.keys(bugsPorModulo).forEach(modulo => {
+            const data = bugsPorModulo[modulo];
+            const ratioCriticos = data.criticos / data.total;
+            if (data.total >= 3 || ratioCriticos >= 0.5) {
+                analisis.modulosAltoRiesgo.push({
+                    modulo: modulo,
+                    totalBugs: data.total,
+                    bugsCriticos: data.criticos,
+                    ratioCriticos: Math.round(ratioCriticos * 100),
+                    nivelRiesgo: ratioCriticos >= 0.7 ? 'Muy Alto' : ratioCriticos >= 0.5 ? 'Alto' : 'Medio'
+                });
+            }
+        });
+        
+        const ciclosOrdenados = ejecuciones.sort((a, b) => new Date(b.fecha) - new Date(a.fecha)).slice(0, 5);
+        
+        if (ciclosOrdenados.length >= 2) {
+            const bugsRecientes = ciclosOrdenados.slice(0, 2).reduce((sum, ciclo) => {
+                let casos = [];
+                try { casos = JSON.parse(ciclo.casosAsociados || '[]'); } catch (e) {}
+                return sum + casos.filter(c => c.status === 'Failed').length;
+            }, 0);
+            
+            const bugsAnteriores = ciclosOrdenados.slice(2, 4).reduce((sum, ciclo) => {
+                let casos = [];
+                try { casos = JSON.parse(ciclo.casosAsociados || '[]'); } catch (e) {}
+                return sum + casos.filter(c => c.status === 'Failed').length;
+            }, 0);
+            
+            if (bugsAnteriores > 0) analisis.tendenciaDefectos = Math.round(((bugsRecientes - bugsAnteriores) / bugsAnteriores) * 100);
+            
+            const promedioReciente = bugsRecientes / 2;
+            analisis.prediccionProximoCiclo = Math.round(promedioReciente * (1 + (analisis.tendenciaDefectos / 100)));
+        }
+        
+        const ratioBugsCasos = casos.length > 0 ? (bugs.length / casos.length) : 0;
+        if (ratioBugsCasos > 0.3) analisis.factoresRiesgo.push({ tipo: 'Alta densidad de defectos', descripcion: `${Math.round(ratioBugsCasos * 100)}% de casos generan bugs`, nivel: 'Alto' });
+        
+        const bugsAbiertos = bugs.filter(b => b.estado !== 'Solucionado').length;
+        if (bugsAbiertos > 10) analisis.factoresRiesgo.push({ tipo: 'Acumulación de bugs', descripcion: `${bugsAbiertos} bugs sin resolver`, nivel: 'Alto' });
+        
+        return analisis;
+    }
+
+    // Sugerencias automáticas de casos de prueba
+    function sugerirCasosPrueba(requisito, casosExistentes, bugsExistentes) {
+        const sugerencias = [];
+        const casosDelRequisito = casosExistentes.filter(c => c.requisito === requisito.id);
+        const bugsDelRequisito = bugsExistentes.filter(b => {
+            const casoRelacionado = casosExistentes.find(c => c.id === b.casoRelacionado);
+            return casoRelacionado && casoRelacionado.requisito === requisito.id;
+        });
+        
+        if (casosDelRequisito.length === 0) {
+            sugerencias.push({ titulo: `Caso de prueba básico para ${requisito.titulo}`, descripcion: `Verificar funcionalidad principal del requisito ${requisito.id}`, prioridad: 'Alta', razon: 'Primer caso para este requisito', tipo: 'Funcional' });
+        }
+        
+        if (bugsDelRequisito.filter(b => b.severidad === 'Crítica' || b.severidad === 'Bloqueante').length > 0) {
+            sugerencias.push({ titulo: `Pruebas de estrés para ${requisito.titulo}`, descripcion: 'Verificar comportamiento con datos límite y condiciones extremas', prioridad: 'Alta', razon: 'Se han detectado bugs críticos en este módulo', tipo: 'No Funcional' });
+        }
+        
+        if (bugsDelRequisito.length >= 3) {
+            sugerencias.push({ titulo: `Validación de manejo de errores - ${requisito.titulo}`, descripcion: 'Verificar que el sistema maneja correctamente las excepciones', prioridad: 'Media', razon: `Alta densidad de defectos (${bugsDelRequisito.length} bugs)`, tipo: 'Funcional' });
+        }
+        
+        const bugsSolucionados = bugsDelRequisito.filter(b => b.estado === 'Solucionado');
+        if (bugsSolucionados.length > 0) {
+            sugerencias.push({ titulo: `Pruebas de regresión - ${requisito.titulo}`, descripcion: `Verificar que los ${bugsSolucionados.length} bugs solucionados no se han reintroducido`, prioridad: 'Media', razon: 'Bugs solucionados requieren validación de regresión', tipo: 'Regresión' });
+        }
+        
+        if (/login|autentic|usuario|contraseña|seguridad|datos/i.test(requisito.titulo)) {
+            sugerencias.push({ titulo: `Pruebas de seguridad - ${requisito.titulo}`, descripcion: 'Verificar autenticación, autorización y protección de datos', prioridad: 'Alta', razon: 'Requisito relacionado con seguridad', tipo: 'Seguridad' });
+        }
+        
+        if (/api|endpoint|consulta|búsqueda|carga/i.test(requisito.titulo)) {
+            sugerencias.push({ titulo: `Pruebas de rendimiento - ${requisito.titulo}`, descripcion: 'Verificar tiempos de respuesta y comportamiento bajo carga', prioridad: 'Media', razon: 'Requisito relacionado con rendimiento', tipo: 'Rendimiento' });
+        }
+        
+        return sugerencias;
+    }
+
+    // Análisis de cobertura inteligente
+    function analizarCoberturaInteligente(requisitos, casos, bugs) {
+        return requisitos.map(req => {
+            const casosReq = casos.filter(c => c.requisito === req.id);
+            const bugsReq = bugs.filter(b => {
+                const caso = casos.find(c => c.id === b.casoRelacionado);
+                return caso && caso.requisito === req.id;
+            });
+            
+            const casosPasados = casosReq.filter(c => c.estado === 'Pasado').length;
+            const cobertura = casosReq.length > 0 ? (casosPasados / casosReq.length) * 100 : 0;
+            
+            let scoreCalidad = cobertura;
+            if (bugsReq.length > 0) scoreCalidad -= ((bugsReq.length / Math.max(casosReq.length, 1)) * 20);
+            scoreCalidad = Math.max(0, Math.min(100, scoreCalidad));
+            
+            return {
+                requisito: req,
+                casosTotales: casosReq.length,
+                cobertura: Math.round(cobertura),
+                bugsTotales: bugsReq.length,
+                scoreCalidad: Math.round(scoreCalidad),
+                nivelRiesgo: scoreCalidad < 50 ? 'Alto' : scoreCalidad < 75 ? 'Medio' : 'Bajo'
+            };
+        }).sort((a, b) => a.scoreCalidad - b.scoreCalidad);
+    }
+
+// ============ GESTIÓN DE DOCUMENTOS E IA ============
+
+// Manejar subida de documento
+window.handleDocumentoUpload = function(input) {
+    const file = input.files[0];
+    if (!file) return;
+    
+    const validTypes = ['text/plain', 'application/pdf', 'application/msword', 
+                        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'];
+    
+    if (!validTypes.includes(file.type) && !file.name.match(/\.(txt|pdf|doc|docx)$/i)) {
+        toast('❌ Formato no válido. Usa TXT, PDF o DOCX', 'error');
+        input.value = '';
+        return;
+    }
+    
+    if (file.size > 5 * 1024 * 1024) {
+        toast('❌ El archivo es demasiado grande. Máximo 5MB', 'error');
+        input.value = '';
+        return;
+    }
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        const base64 = e.target.result;
+        // Guardar temporalmente en sessionStorage
+        sessionStorage.setItem('temp_documento_' + getActiveProject(), JSON.stringify({
+            contenido: base64,
+            nombre: file.name,
+            tipo: file.type
+        }));
+        
+        toast('Documento cargado. Guarda el requisito para procesarlo.', 'success');
+        
+        // Mostrar preview del documento cargado
+        const container = input.closest('.form-group');
+        const preview = document.createElement('div');
+        preview.id = 'documento-preview';
+        preview.style.cssText = 'margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; display:flex; align-items:center; justify-content:space-between;';
+        preview.innerHTML = `
+            <div style="display:flex; align-items:center; gap:10px;">
+                <span style="font-size:1.5rem;">📄</span>
+                <div>
+                    <div style="font-weight:600; font-size:0.9rem;">Documento adjunto</div>
+                    <div style="font-size:0.75rem; color:var(--text2);">${file.name}</div>
+                </div>
+            </div>
+            <button type="button" class="btn btn-sm btn-outline" onclick="eliminarDocumentoPreview()">🗑️</button>
+        `;
+        
+        const existing = container.querySelector('#documento-preview');
+        if (existing) existing.remove();
+        container.appendChild(preview);
+        
+        // Actualizar el formulario para mostrar el botón de análisis
+        setTimeout(() => {
+            const analizarBtn = document.querySelector('#btn-analizar-ia');
+            if (analizarBtn) {
+                analizarBtn.style.display = 'block';
+            }
+        }, 100);
+    };
+    reader.readAsDataURL(file);
+};
+
+
+window.eliminarDocumentoPreview = function() {
+    sessionStorage.removeItem('temp_documento_' + getActiveProject());
+    const preview = document.getElementById('documento-preview');
+    if (preview) preview.remove();
+    const fileInput = document.getElementById('f_documento');
+    if (fileInput) fileInput.value = '';
+    
+    const analizarBtn = document.querySelector('#btn-analizar-ia');
+    if (analizarBtn) {
+        analizarBtn.style.display = 'none';
+    }
+    
+    toast('Documento eliminado', 'info');
+};
+
+window.eliminarDocumento = function() {
+    if (confirm('¿Eliminar este documento?')) {
+        const id = new URLSearchParams(window.location.search).get('id') || 
+                document.querySelector('[data-action="edit"][data-id]')?.dataset.id;
+        if (id) {
+            const req = appData.requisitos.find(r => r.id === id);
+            if (req) {
+                delete req.documento;
+                delete req.nombreDocumento;
+                saveData();
+                renderPage('requisitos');
+                toast('Documento eliminado', 'info');
+            }
+        }
+    }
+};
+
+// Extraer texto de documento (simulado - en producción usar librerías como pdf.js o mammoth.js)
+function extraerCasosDeTexto(texto) {
+    const casos = [];
+    const lines = texto.split(/\n+/);
+    let currentCase = null;
+    
+    // Patrones mejorados
+    const patterns = {
+        casoInicio: /(caso|escenario|prueba|test|tc)\s*(\d+|de|:|-)?/i,
+        titulo: /^(?:\d+[\.\)]\s*)?(?:caso|escenario|prueba|test|tc)?\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        actor: /(actor|usuario|rol|perfil|quien)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        precondicion: /(precondicion|pre-condicion|requisito previo|condicion inicial|dado que)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        paso: /(?:paso|step)\s*(\d+)|^\s*[-•*]\s*(.+)/gi,
+        resultado: /(resultado|esperado|entonces|then|se espera)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        prioridad: /(prioridad|priority)\s*[:.-]?\s*(alta|media|baja|critica|urgente)/i
+    };
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        
+        // Detectar inicio de nuevo caso
+        if (patterns.casoInicio.test(trimmed)) {
+            if (currentCase) {
+                casos.push(currentCase);
+            }
+            currentCase = {
+                id: 'AUTO-' + (casos.length + 1),
+                titulo: trimmed.replace(patterns.casoInicio, '').trim().substring(0, 100),
+                descripcion: '',
+                actor: 'Usuario',
+                precondicion: '',
+                pasos: [],
+                resultado: '',
+                prioridad: 'Media',
+                confianza: 85
+            };
+        } else if (currentCase) {
+            // Extraer actor
+            const actorMatch = trimmed.match(patterns.actor);
+            if (actorMatch) {
+                currentCase.actor = actorMatch[2].trim();
+            }
+            
+            // Extraer precondición
+            const precondMatch = trimmed.match(patterns.precondicion);
+            if (precondMatch) {
+                currentCase.precondicion = precondMatch[2].trim();
+            }
+            
+            // Extraer pasos
+            const pasoMatch = trimmed.match(patterns.paso);
+            if (pasoMatch) {
+                currentCase.pasos.push(trimmed.replace(/^(paso|step)\s*\d+[:.-]?\s*/i, '').trim());
+            } else if (/^[-•*]/.test(trimmed) && trimmed.length > 10) {
+                currentCase.pasos.push(trimmed.replace(/^[-•*]\s*/, '').trim());
+            }
+            
+            // Extraer resultado
+            const resultMatch = trimmed.match(patterns.resultado);
+            if (resultMatch) {
+                currentCase.resultado = resultMatch[2].trim();
+            }
+            
+            // Extraer prioridad
+            const priorityMatch = trimmed.match(patterns.prioridad);
+            if (priorityMatch) {
+                const prio = priorityMatch[2].toLowerCase();
+                currentCase.prioridad = prio === 'alta' || prio === 'critica' || prio === 'urgente' ? 'Alta' :
+                                        prio === 'baja' ? 'Baja' : 'Media';
+            }
+            
+            // Si no coincide con ningún patrón específico, añadir a descripción
+            if (!actorMatch && !precondMatch && !pasoMatch && !resultMatch && !priorityMatch) {
+                currentCase.descripcion += trimmed + ' ';
+            }
+        }
+    });
+    
+    // Añadir último caso
+    if (currentCase) {
+        casos.push(currentCase);
+    }
+    
+    // Si no se encontraron casos estructurados, intentar extraer funcionalidades
+    if (casos.length === 0) {
+        const funcionalidades = texto.match(/(?:debe|puede|permite|permitir|realizar|ejecutar|mostrar|validar|verificar)\s+[^.]+/gi) || [];
+        funcionalidades.slice(0, 5).forEach((func, idx) => {
+            casos.push({
+                id: 'AUTO-' + (idx + 1),
+                titulo: func.trim().substring(0, 80),
+                descripcion: func.trim(),
+                actor: 'Usuario',
+                precondicion: '',
+                pasos: ['Ejecutar la funcionalidad'],
+                resultado: 'Sistema responde correctamente',
+                prioridad: 'Media',
+                confianza: 60
+            });
+        });
+    }
+    
+    return casos;
+}
+
+// Análisis de IA para generar casos de uso
+// Análisis de IA para generar casos de uso
+window.analizarDocumentoIA = function() {
+    console.log('🔍 Iniciando análisis de documento...');
+    
+    // 1. Intentar obtener el documento de sessionStorage (si se acaba de subir)
+    let tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
+    let docData;
+    
+    if (tempDoc) {
+        docData = JSON.parse(tempDoc);
+    } else {
+        // 2. Si no está en sessionStorage, buscarlo en el requisito actual (modo edición)
+        const reqId = document.getElementById('f_id')?.value;
+        if (!reqId) {
+            toast('Error: No se encuentra el ID del requisito', 'error');
+            return;
+        }
+        
+        const req = appData.requisitos.find(r => r.id === reqId);
+        if (!req || !req.documento) {
+            toast('No hay documento cargado. Sube un PDF, DOCX o TXT primero.', 'error');
+            return;
+        }
+        
+        // Reconstruir el objeto docData desde Firebase
+        docData = {
+            contenido: req.documento,
+            nombre: req.nombreDocumento || 'documento.pdf',
+            tipo: req.tipoDocumento || 'application/pdf'
+        };
+    }
+
+    try {
+        const texto = extraerTextoDeDocumento(docData.contenido, docData.tipo);
+        
+        if (!texto || texto.length < 10) {
+            toast('El documento parece estar vacío o no se pudo extraer texto legible.', 'warning');
+            return;
+        }
+        
+        console.log(' Texto extraído:', texto.substring(0, 100) + '...');
+        
+        // Analizar texto y extraer casos de uso
+        const casosSugeridos = extraerCasosDeTexto(texto);
+        
+        if (casosSugeridos.length === 0) {
+            toast('️ No se pudieron extraer casos de uso. Asegúrate de que el documento contenga palabras clave como "Caso", "Escenario", "Debe", "Puede", etc.', 'warning');
+            return;
+        }
+        
+        console.log(`✅ ${casosSugeridos.length} casos extraídos correctamente.`);
+        
+        // Mostrar modal de revisión
+        mostrarModalRevisionCasos(casosSugeridos, docData);
+        
+    } catch (error) {
+        console.error('❌ Error al analizar documento:', error);
+        toast('Error interno al procesar el documento: ' + error.message, 'error');
+    }
+};
+
+// Función para extraer texto de documentos
+window.extraerTextoDeDocumento = function(base64, tipo) {
+    try {
+        // Para TXT
+        if (tipo.includes('text/plain') || base64.includes('data:text/plain')) {
+            return atob(base64.split(',')[1]);
+        }
+        // Para PDF - en producción usar pdf.js
+        if (tipo.includes('application/pdf') || base64.includes('data:application/pdf')) {
+            // Simulación - en producción usar librería pdf.js
+            return "Documento PDF cargado. Para extracción real de texto, integrar pdf.js";
+        }
+        // Para DOCX - en producción usar mammoth.js
+        if (tipo.includes('application/vnd.openxmlformats') || base64.includes('data:application/vnd.openxmlformats')) {
+            // Simulación - en producción usar mammoth.js
+            return "Documento Word cargado. Para extracción real de texto, integrar mammoth.js";
+        }
+        return "Formato de documento no soportado completamente";
+    } catch (error) {
+        console.error("Error al extraer texto:", error);
+        return "Error al procesar el documento";
+    }
+};
+
+
+
+// Extraer casos de uso del texto usando patrones y NLP básico
+function extraerCasosDeTexto(texto) {
+    const casos = [];
+    const lines = texto.split(/\n+/);
+    let currentCase = null;
+    
+    // Patrones ampliados para documentos funcionales
+    const patterns = {
+        casoInicio: /(caso|escenario|prueba|test|requisito funcional|rf-?\d+)/i,
+        actor: /(actor|usuario|rol|perfil|responsable)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        precondicion: /(precondicion|pre-condicion|requisito previo|condicion inicial|contexto)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        paso: /(?:paso|step|acción)\s*(\d+)|^\s*[-•*]\s*(.+)/gi,
+        resultado: /(resultado|esperado|entonces|then|salida)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        prioridad: /(prioridad|priority|severidad)\s*[:.-]?\s*(alta|media|baja|critica|urgente)/i
+    };
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        
+        // Detectar inicio de nuevo caso
+        if (patterns.casoInicio.test(trimmed)) {
+            if (currentCase) {
+                casos.push(currentCase);
+            }
+            
+            currentCase = {
+                id: 'AUTO-' + (casos.length + 1),
+                titulo: trimmed.replace(patterns.casoInicio, '').trim(),
+                descripcion: '',
+                actor: 'Usuario',
+                precondicion: '',
+                pasos: [],
+                resultado: '',
+                prioridad: 'Media',
+                confianza: 85
+            };
+        } else if (currentCase) {
+            // Extraer actor
+            const actorMatch = trimmed.match(patterns.actor);
+            if (actorMatch) {
+                currentCase.actor = actorMatch[2].trim();
+            }
+            
+            // Extraer precondición
+            const precondMatch = trimmed.match(patterns.precondicion);
+            if (precondMatch) {
+                currentCase.precondicion = precondMatch[2].trim();
+            }
+            
+            // Extraer pasos
+            const pasoMatch = trimmed.match(patterns.paso);
+            if (pasoMatch) {
+                currentCase.pasos.push(trimmed.replace(/^(paso|step)\s*\d+[:.-]?\s*/i, '').trim());
+            } else if (/^[-•*]/.test(trimmed) && trimmed.length > 10) {
+                currentCase.pasos.push(trimmed.replace(/^[-•*]\s*/, '').trim());
+            }
+            
+            // Extraer resultado
+            const resultMatch = trimmed.match(patterns.resultado);
+            if (resultMatch) {
+                currentCase.resultado = resultMatch[2].trim();
+            }
+            
+            // Extraer prioridad
+            const priorityMatch = trimmed.match(patterns.prioridad);
+            if (priorityMatch) {
+                const prio = priorityMatch[2].toLowerCase();
+                currentCase.prioridad = prio === 'alta' || prio === 'critica' || prio === 'urgente' ? 'Alta' : prio === 'baja' ? 'Baja' : 'Media';
+            }
+            
+            // Si no coincide con ningún patrón específico, añadir a descripción
+            if (!actorMatch && !precondMatch && !pasoMatch && !resultMatch && !priorityMatch) {
+                currentCase.descripcion += trimmed + ' ';
+            }
+        }
+    });
+    
+    // Añadir último caso
+    if (currentCase) {
+        casos.push(currentCase);
+    }
+    
+    // Si no se encontraron casos estructurados, intentar extraer funcionalidades
+    if (casos.length === 0) {
+        const funcionalidades = texto.match(/(?:debe|puede|permite|permitir|realizar|ejecutar|mostrar|validar|verificar)\s+[^.]+/gi) || [];
+        funcionalidades.slice(0, 5).forEach((func, idx) => {
+            casos.push({
+                id: 'AUTO-' + (idx + 1),
+                titulo: func.trim().substring(0, 80),
+                descripcion: func.trim(),
+                actor: 'Usuario',
+                precondicion: '',
+                pasos: ['Ejecutar la funcionalidad'],
+                resultado: 'Sistema responde correctamente',
+                prioridad: 'Media',
+                confianza: 60
+            });
+        });
+    }
+    
+    return casos;
+}
+
+// Mostrar modal de revisión de casos
+function mostrarModalRevisionCasos(casos, docData) {
+    const container = document.getElementById('modalContainer');
+    container.innerHTML = `
+        <div class="modal-overlay">
+            <div class="modal" style="max-width: 1000px; max-height: 90vh; overflow-y: auto;">
+                <h3>🤖 Casos de Uso Generados por IA</h3>
+                <p style="color: var(--text2); margin-bottom: 20px;">
+                    Se han detectado <strong>${casos.length} casos de uso</strong> en el documento "${docData.nombre}".
+                    Revisa y selecciona los que desees crear.
+                </p>
+                
+                <div style="max-height: 60vh; overflow-y: auto; margin-bottom: 20px;">
+                    ${casos.map((caso, idx) => `
+                        <div class="ia-case-card" style="padding: 16px; background: var(--card-alt); border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${caso.confianza >= 80 ? 'var(--success)' : caso.confianza >= 60 ? 'var(--warning)' : 'var(--info)'};">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1;">
+                                    <input type="checkbox" class="case-select" value="${idx}" checked style="width: 20px; height: 20px; cursor: pointer;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: var(--accent);">${caso.titulo}</div>
+                                        <div style="font-size: 0.8rem; color: var(--text2); margin-top: 4px;">
+                                            👤 ${caso.actor} · 🎯 ${caso.prioridad} · 📊 ${caso.confianza}% confianza
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                            ${caso.precondicion ? `<div style="font-size: 0.85rem; margin: 8px 0; padding: 8px; background: var(--bg); border-radius: 6px;"><strong>Precondición:</strong> ${caso.precondicion}</div>` : ''}
+                            ${caso.pasos.length > 0 ? `
+                                <div style="font-size: 0.85rem; margin: 8px 0;">
+                                    <strong>Pasos:</strong>
+                                    <ol style="margin: 8px 0; padding-left: 20px;">
+                                        ${caso.pasos.map(p => `<li>${p}</li>`).join('')}
+                                    </ol>
+                                </div>
+                            ` : ''}
+                            ${caso.resultado ? `<div style="font-size: 0.85rem; margin: 8px 0; padding: 8px; background: rgba(16, 185, 129, 0.1); border-radius: 6px;"><strong>Resultado esperado:</strong> ${caso.resultado}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 16px; background: var(--bg); border-radius: 8px; margin-bottom: 20px;">
+                    <button class="btn btn-accent" onclick="crearCasosSeleccionadosIA(${casos.length})">
+                        ✅ Crear Casos Seleccionados
+                    </button>
+                    <button class="btn btn-outline" onclick="selectAllCases(true)">Seleccionar todos</button>
+                    <button class="btn btn-outline" onclick="selectAllCases(false)">Deseleccionar todos</button>
+                    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+                </div>
+                
+                <div style="font-size: 0.8rem; color: var(--text2); padding: 12px; background: rgba(139, 92, 246, 0.1); border-radius: 8px;">
+                    💡 <strong>Consejo:</strong> Los casos con mayor porcentaje de confianza tienen más probabilidad de ser correctos. 
+                    Revisa especialmente los que están por debajo del 70%.
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+
+window.verDetalleCasoIA = function(idx) {
+    // Implementar si se necesita ver más detalles
+    toast('Vista detallada del caso ' + (idx + 1), 'info');
+};
+
+window.selectAllCases = function(selectAll) {
+    document.querySelectorAll('.case-select').forEach(cb => {
+        cb.checked = selectAll;
+    });
+};
+
+window.crearCasosSeleccionadosIA = function(totalCasos) {
+    const selected = Array.from(document.querySelectorAll('.case-select:checked')).map(cb => parseInt(cb.value));
+    
+    if (selected.length === 0) {
+        toast('️ Selecciona al menos un caso para crear', 'warning');
+        return;
+    }
+    
+    // Obtener el requisito actual del modal
+    const reqId = document.getElementById('f_id')?.value;
+    if (!reqId) {
+        toast('❌ Error: No hay requisito seleccionado', 'error');
+        return;
+    }
+    
+    // Obtener casos del modal
+    const tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
+    if (!tempDoc) {
+        toast('❌ Error: Documento no encontrado', 'error');
+        return;
+    }
+    
+    const docData = JSON.parse(tempDoc);
+    const texto = extraerTextoDeDocumento(docData.contenido, docData.tipo);
+    const casosSugeridos = extraerCasosDeTexto(texto);
+    
+    // Crear los casos seleccionados
+    let creados = 0;
+    selected.forEach(idx => {
+        const casoData = casosSugeridos[idx];
+        const newCase = {
+            id: casoData.id,
+            requisito: reqId,
+            titulo: casoData.titulo,
+            descripcion: casoData.descripcion,
+            actor: casoData.actor,
+            precondicion: casoData.precondicion,
+            flujo: casoData.pasos.join('\n'),
+            resultadoEsperado: casoData.resultado,
+            prioridad: casoData.prioridad,
+            estado: 'Pendiente',
+            proyecto: getActiveProject(),
+            generadoPorIA: true,
+            confianzaIA: casoData.confianza
+        };
+        
+        appData.casos.push(newCase);
+        creados++;
+    });
+    
+    saveData();
+    closeModal();
+    
+    // Limpiar documento temporal
+    sessionStorage.removeItem('temp_documento_' + getActiveProject());
+    
+    toast(`✅ Se han creado ${creados} casos de uso automáticamente`, 'success');
+    
+    // Redirigir a casos para verlos
+    setTimeout(() => {
+        renderPage('casos');
+    }, 1000);
+};
+
+window.analizarAPIsDeDocumento = function() {
+    const tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
+    if (!tempDoc) {
+        toast('❌ No hay documento cargado', 'error');
+        return;
+    }
+    
+    const docData = JSON.parse(tempDoc);
+    const texto = extraerTextoDeDocumento(docData.contenido, docData.tipo);
+    
+    // Analizar texto y extraer APIs
+    const apisSugeridas = extraerAPIsDeTexto(texto);
+    
+    if (apisSugeridas.length === 0) {
+        toast('⚠️ No se pudieron extraer APIs del documento', 'warning');
+        return;
+    }
+    
+    // Mostrar modal de revisión (similar al de casos)
+    mostrarModalRevisionAPIs(apisSugeridas, docData);
+};
+
+function extraerAPIsDeTexto(texto) {
+    const apis = [];
+    const lines = texto.split(/\n+/);
+    let currentAPI = null;
+    
+    // Patrones para detectar APIs/endpoints
+    const patterns = {
+        endpoint: /(GET|POST|PUT|DELETE|PATCH)\s+([\/\w-]+)/i,
+        nombre: /(?:endpoint|api|recurso|servicio)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        descripcion: /(?:descripcion|description|descripcion)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        request: /(?:request|body|parametros|params)\s*[:.-]?\s*(.+?)(?=\n|$)/i,
+        response: /(?:response|respuesta|response)\s*[:.-]?\s*(.+?)(?=\n|$)/i
+    };
+    
+    lines.forEach((line, index) => {
+        const trimmed = line.trim();
+        if (!trimmed) return;
+        
+        // Detectar endpoint
+        const endpointMatch = trimmed.match(patterns.endpoint);
+        if (endpointMatch) {
+            if (currentAPI) {
+                apis.push(currentAPI);
+            }
+            
+            currentAPI = {
+                id: 'API-AUTO-' + (apis.length + 1),
+                metodo: endpointMatch[1].toUpperCase(),
+                endpoint: endpointMatch[2],
+                nombre: `API ${endpointMatch[1].toUpperCase()} ${endpointMatch[2]}`,
+                descripcion: '',
+                request: '',
+                responseEsperada: '',
+                estado: 'Pendiente',
+                confianza: 80
+            };
+        } else if (currentAPI) {
+            // Extraer nombre
+            const nombreMatch = trimmed.match(patterns.nombre);
+            if (nombreMatch) {
+                currentAPI.nombre = nombreMatch[1].trim();
+            }
+            
+            // Extraer descripción
+            const descMatch = trimmed.match(patterns.descripcion);
+            if (descMatch) {
+                currentAPI.descripcion = descMatch[1].trim();
+            }
+            
+            // Extraer request
+            const requestMatch = trimmed.match(patterns.request);
+            if (requestMatch) {
+                currentAPI.request = requestMatch[1].trim();
+            }
+            
+            // Extraer response
+            const responseMatch = trimmed.match(patterns.response);
+            if (responseMatch) {
+                currentAPI.responseEsperada = responseMatch[1].trim();
+            }
+        }
+    });
+    
+    if (currentAPI) {
+        apis.push(currentAPI);
+    }
+    
+    return apis;
+}
+
+function mostrarModalRevisionAPIs(apis, docData) {
+    const container = document.getElementById('modalContainer');
+    container.innerHTML = `
+        <div class="modal-overlay">
+            <div class="modal" style="max-width: 1000px; max-height: 90vh; overflow-y: auto;">
+                <h3> APIs Generadas por IA</h3>
+                <p style="color: var(--text2); margin-bottom: 20px;">
+                    Se han detectado <strong>${apis.length} APIs/endpoints</strong> en el documento "${docData.nombre}".
+                </p>
+                
+                <div style="max-height: 60vh; overflow-y: auto; margin-bottom: 20px;">
+                    ${apis.map((api, idx) => `
+                        <div class="ia-case-card" style="padding: 16px; background: var(--card-alt); border-radius: 8px; margin-bottom: 12px; border-left: 4px solid var(--accent2);">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+                                <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; flex: 1;">
+                                    <input type="checkbox" class="api-select" value="${idx}" checked style="width: 20px; height: 20px; cursor: pointer;">
+                                    <div style="flex: 1;">
+                                        <div style="font-weight: 600; color: var(--accent);">
+                                            <span class="badge badge-info">${api.metodo}</span> ${api.endpoint}
+                                        </div>
+                                        <div style="font-size: 0.8rem; color: var(--text2); margin-top: 4px;">
+                                            ${api.nombre}
+                                        </div>
+                                    </div>
+                                </label>
+                            </div>
+                            ${api.descripcion ? `<div style="font-size: 0.85rem; margin: 8px 0; padding: 8px; background: var(--bg); border-radius: 6px;"><strong>Descripción:</strong> ${api.descripcion}</div>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+                
+                <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; padding: 16px; background: var(--bg); border-radius: 8px; margin-bottom: 20px;">
+                    <button class="btn btn-accent" onclick="crearAPIsSeleccionadasIA(${apis.length})">
+                        ✅ Crear ${apis.length} APIs Seleccionadas
+                    </button>
+                    <button class="btn btn-outline" onclick="selectAllAPIs(true)">Seleccionar todas</button>
+                    <button class="btn btn-outline" onclick="selectAllAPIs(false)">Deseleccionar todas</button>
+                    <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+window.selectAllAPIs = function(selectAll) {
+    document.querySelectorAll('.api-select').forEach(cb => {
+        cb.checked = selectAll;
+    });
+};
+
+window.crearAPIsSeleccionadasIA = function(totalAPIs) {
+    const selected = Array.from(document.querySelectorAll('.api-select:checked')).map(cb => parseInt(cb.value));
+    
+    if (selected.length === 0) {
+        toast('⚠️ Selecciona al menos una API para crear', 'warning');
+        return;
+    }
+    
+    const tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
+    const docData = JSON.parse(tempDoc);
+    const apisSugeridas = extraerAPIsDeTexto(extraerTextoDeDocumento(docData.contenido, docData.tipo));
+    
+    let creadas = 0;
+    selected.forEach(idx => {
+        const apiData = apisSugeridas[idx];
+        const newAPI = {
+            id: apiData.id,
+            nombre: apiData.nombre,
+            endpoint: apiData.endpoint,
+            metodo: apiData.metodo,
+            request: apiData.request,
+            respEsperada: apiData.responseEsperada,
+            descripcion: apiData.descripcion,
+            estado: 'Pendiente',
+            proyecto: getActiveProject(),
+            generadoPorIA: true
+        };
+        
+        appData.apis.push(newAPI);
+        creadas++;
+    });
+    
+    saveData();
+    closeModal();
+    sessionStorage.removeItem('temp_documento_' + getActiveProject());
+    
+    toast(`✅ Se han creado ${creadas} APIs automáticamente`, 'success');
+    
+    setTimeout(() => {
+        renderPage('apis');
+    }, 1000);
+};
+
     // ============ APP INIT ============
     function showApp() {
         document.getElementById('authScreen').style.display = 'none';
@@ -294,6 +1231,7 @@
                     { page: 'requisitos', icon: '📑', label: 'Requisitos', iconClass: 'icon-requisitos' },
                     { page: 'mejoras', icon: '💡', label: 'Propuestas', iconClass: 'icon-mejoras' },
                     { page: 'objetivos', icon: '🎯', label: 'Objetivos', iconClass: 'icon-objetivos' },
+                    { page: 'ia', icon: '🤖', label: 'IA & Analytics', iconClass: 'icon-ia' }
                 ]
             },
             {
@@ -312,10 +1250,10 @@
                 ], adminOnly: true
             },
             {
-                section: 'Gestión', 
+                section: 'Gestión',
                 items: [
                     { page: 'permisos', icon: '🔐', label: 'Permisos Consultores', iconClass: 'icon-ajustes' }
-                ], 
+                ],
                 adminOnly: true
             }
         ];
@@ -350,25 +1288,25 @@
         const u = document.getElementById('regUser').value.trim();
         const p = document.getElementById('regPass').value;
         const p2 = document.getElementById('regPass2').value;
-        
+
         // Ya no leemos el rol del formulario. Lo fijamos por defecto.
-        const rolInicial = 'Consultor'; 
-        
+        const rolInicial = 'Consultor';
+
         if (!n || !u || !p) return toast('Completa todos los campos', 'error');
         if (p.length < 6) return toast('Mínimo 6 caracteres', 'error');
         if (p !== p2) return toast('Contraseñas no coinciden', 'error');
         if (appData.usuarios.find(x => x.usuario === u)) return toast('Usuario ya existe', 'error');
-        
+
         // Guardamos el usuario con el rol por defecto y sin proyectos autorizados aún
-        appData.usuarios.push({ 
-            id: Date.now(), 
-            nombre: n, 
-            usuario: u, 
-            password: p, 
+        appData.usuarios.push({
+            id: Date.now(),
+            nombre: n,
+            usuario: u,
+            password: p,
             rol: rolInicial,
             proyectosAutorizados: [] // Se inicializa vacío para que el Admin los asigne después
         });
-        
+
         saveData();
         toast('Registro exitoso. Un admin debe activar tu rol.', 'success');
         window.showLogin();
@@ -690,10 +1628,10 @@
         }
         // Y finalmente, llamamos al renderizado
         renderPage(page);
-        
+
         // ✅ NUEVO: Actualizar título de la página
         updatePageTitle(page);
-        
+
         // Cierra el sidebar en móviles
         if (window.innerWidth <= 768) {
             document.getElementById('sidebar').classList.remove('open');
@@ -720,13 +1658,14 @@
             'historico': { icon: '📦', title: 'Histórico' },
             'ajustes': { icon: '⚙️', title: 'Ajustes' },
             'permisos': { icon: '', title: 'Permisos Consultores' },
-            'manual': { icon: '', title: 'Manual de Usuario' }
+            'manual': { icon: '', title: 'Manual de Usuario' },
+            'ia': { icon: '', title: 'IA & Machine Learning' }
         };
-        
+
         const titleData = pageTitles[page] || { icon: '📄', title: page };
         const iconEl = document.getElementById('pageTitleIcon');
         const textEl = document.getElementById('pageTitleText');
-        
+
         if (iconEl) iconEl.textContent = titleData.icon;
         if (textEl) textEl.textContent = titleData.title;
     }
@@ -734,10 +1673,10 @@
     function updateSidebarDisabledState() {
         const proyectoActivo = getActiveProject();
         const paginasExentas = ['dashboard', 'proyectos', 'usuarios', 'ajustes', 'manual'];
-        
+
         document.querySelectorAll('.nav-item').forEach(item => {
             const page = item.dataset.page;
-            
+
             // Si no hay proyecto activo y la página requiere proyecto
             if (!proyectoActivo && projectRequiredPages.includes(page) && !paginasExentas.includes(page)) {
                 item.classList.add('disabled');
@@ -749,7 +1688,7 @@
         });
     }
 
-    function renderPage(page) {
+        window.renderPage = function(page) {
         const content = document.getElementById('contentArea');
         let html = '';
         switch (page) {
@@ -771,12 +1710,29 @@
             case 'permisos': html = renderConsultantPermissions(); break;
             case 'manual': html = renderManual(); break;
             case 'requisitos': html = renderRequisitos(); break;
+            case 'ia': html = renderIA(); break;
         }
         content.innerHTML = html;
         bindPageEvents(page);
         const si = content.querySelector('.search-input');
         if (si) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
     }
+
+    window.clearFilters = function(page) {
+        // 1. Limpiar el término de búsqueda global
+        searchTerm = '';
+        const searchInput = document.querySelector('.search-input');
+        if (searchInput) searchInput.value = '';
+        
+        // 2. Limpiar todos los selectores de filtro (los que empiezan por 'filter_')
+        document.querySelectorAll('[id^="filter_"]').forEach(select => {
+            select.value = '';
+        });
+        
+        // 3. Re-renderizar la página para aplicar los cambios
+        renderPage(page);
+    };
+
 
     function bindPageEvents(page) {
         const content = document.getElementById('contentArea');
@@ -807,7 +1763,7 @@
                 renderPage(page);
             })
         );
-        
+
         // ✅ Inicializar tooltip de capturas QA
         initCaptureTooltip();
     }
@@ -906,43 +1862,83 @@
                 </div>
             </div>
         `;
-        
+
         // ✅ CORRECCIÓN: Devolvemos el HTML en lugar de inyectarlo directamente
-        return html; 
+        return html;
     }
 
     function renderRequisitos() {
         const data = filterByProject(appData.requisitos);
         const cols = [
-            { label: 'ID', field: 'id' }, 
-            { label: 'Requisito', field: 'titulo' }, 
+            { label: 'ID', field: 'id' },
+            { label: 'Título', field: 'titulo' },
             { label: 'Descripción', field: 'descripcion' },
             { label: 'Tipo', field: 'tipo' },
             { label: 'Casos', field: 'casos' },
-            { label: 'APIs', field: 'apis' }
+            { label: 'APIs', field: 'apis' },
+            { label: 'Documentos', field: 'documento' }  // Nueva columna
         ];
-        return '<h1 class="page-title">📑 Requisitos</h1>' + 
+        
+        return '<h1 class="page-title">📑 Requisitos</h1>' +
         renderTable('requisitos', cols, data, i => {
             const casosCount = appData.casos.filter(c => c.requisito === i.id).length;
             const apisCount = appData.apis.filter(a => a.requisito === i.id).length;
+            const hasDoc = i.documento ? '📄' : '';
+            
             return `<td><code>${i.id}</code></td>
                     <td><b>${i.titulo || ''}</b></td>
                     <td>${i.descripcion || '-'}</td>
                     <td><span class="badge badge-info">${i.tipo || 'Funcional'}</span></td>
                     <td><span class="badge badge-purple">${casosCount} casos</span></td>
-                    <td><span class="badge badge-purple">${apisCount} APIs</span></td>`;
-        });
+                    <td><span class="badge badge-purple">${apisCount} APIs</span></td>
+                    <td>${hasDoc ? '<span class="badge badge-success" title="Documento adjunto">📄</span>' : '<span style="color:var(--text2);">-</span>'}</td>`;
+        }, true, 'requisito');
     }
+
+    // Habilitar drag & drop en el input de archivo
+    document.addEventListener('DOMContentLoaded', () => {
+        const uploadZone = document.querySelector('.document-upload-zone');
+        if (uploadZone) {
+            ['dragenter', 'dragover', 'dragleave', 'drop'].forEach(eventName => {
+                uploadZone.addEventListener(eventName, preventDefaults, false);
+            });
+            
+            function preventDefaults(e) {
+                e.preventDefault();
+                e.stopPropagation();
+            }
+            
+            ['dragenter', 'dragover'].forEach(eventName => {
+                uploadZone.addEventListener(eventName, () => {
+                    uploadZone.classList.add('dragover');
+                }, false);
+            });
+            
+            ['dragleave', 'drop'].forEach(eventName => {
+                uploadZone.addEventListener(eventName, () => {
+                    uploadZone.classList.remove('dragover');
+                }, false);
+            });
+            
+            uploadZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                const files = dt.files;
+                const input = document.getElementById('f_documento');
+                input.files = files;
+                handleDocumentoUpload(input);
+            }, false);
+        }
+    });
 
     function renderVistaPorRequisito() {
         const requisitos = filterByProject(appData.requisitos);
         let html = '<h1 class="page-title">📊 Cobertura por Requisito</h1>';
-        
+
         if (requisitos.length === 0) {
             html += '<div class="empty-state"><div class="empty-state-icon">📭</div><div>No hay requisitos creados</div></div>';
             return html;
         }
-        
+
         html += '<div class="chart-grid">';
         requisitos.forEach(req => {
             const casos = appData.casos.filter(c => c.requisito === req.id);
@@ -950,7 +1946,7 @@
             const casosPasados = casos.filter(c => c.estado === 'Pasado').length;
             const casosFallidos = casos.filter(c => c.estado === 'Fallido').length;
             const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
-            
+
             html += `
             <div class="chart-card">
                 <div class="chart-title">📋 ${req.id} - ${req.titulo}</div>
@@ -965,10 +1961,10 @@
                 <div style="margin-bottom:12px;">
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px;">
                         <span>Cobertura Casos</span>
-                        <span>${casos.length > 0 ? Math.round((casosPasados/casos.length)*100) : 0}%</span>
+                        <span>${casos.length > 0 ? Math.round((casosPasados / casos.length) * 100) : 0}%</span>
                     </div>
                     <div style="height:6px; background:var(--bg2); border-radius:3px; overflow:hidden;">
-                        <div style="width:${casos.length > 0 ? (casosPasados/casos.length)*100 : 0}%; height:100%; background:var(--success);"></div>
+                        <div style="width:${casos.length > 0 ? (casosPasados / casos.length) * 100 : 0}%; height:100%; background:var(--success);"></div>
                     </div>
                     <div style="font-size:0.75rem; color:var(--text2); margin-top:4px;">
                         ✅ ${casosPasados} pasados | ❌ ${casosFallidos} fallidos
@@ -979,10 +1975,10 @@
                 <div>
                     <div style="display:flex; justify-content:space-between; font-size:0.8rem; margin-bottom:5px;">
                         <span>APIs Funcionales</span>
-                        <span>${apis.length > 0 ? Math.round((apisCorrectas/apis.length)*100) : 0}%</span>
+                        <span>${apis.length > 0 ? Math.round((apisCorrectas / apis.length) * 100) : 0}%</span>
                     </div>
                     <div style="height:6px; background:var(--bg2); border-radius:3px; overflow:hidden;">
-                        <div style="width:${apis.length > 0 ? (apisCorrectas/apis.length)*100 : 0}%; height:100%; background:var(--accent2);"></div>
+                        <div style="width:${apis.length > 0 ? (apisCorrectas / apis.length) * 100 : 0}%; height:100%; background:var(--accent2);"></div>
                     </div>
                     <div style="font-size:0.75rem; color:var(--text2); margin-top:4px;">
                         ✅ ${apisCorrectas} correctas | ❌ ${apis.length - apisCorrectas} con error
@@ -998,6 +1994,280 @@
         html += '</div>';
         return html;
     }
+
+function renderIA() {
+    const casos = filterByProject(appData.casos);
+    const bugs = filterByProject(appData.bugs);
+    const ejecuciones = filterByProject(appData.ejecuciones);
+    const requisitos = filterByProject(appData.requisitos);
+    
+    const prediccion = predecirDefectos(casos, bugs, ejecuciones);
+    const coberturaIA = analizarCoberturaInteligente(requisitos, casos, bugs);
+    
+    let html = `<h1 class="page-title"> IA & Machine Learning</h1>
+        <p class="page-subtitle">Análisis inteligente y predicciones basadas en datos históricos</p>
+        
+        <!-- KPIs de IA -->
+        <div class="kpi-grid" style="margin-bottom: 30px;">
+            <div class="kpi-card">
+                <div class="kpi-icon">🎯</div>
+                <div class="kpi-value">${prediccion.modulosAltoRiesgo.length}</div>
+                <div class="kpi-label">Módulos Alto Riesgo</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon">📈</div>
+                <div class="kpi-value">${prediccion.tendenciaDefectos > 0 ? '+' : ''}${prediccion.tendenciaDefectos}%</div>
+                <div class="kpi-label">Tendencia Defectos</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon"></div>
+                <div class="kpi-value">${prediccion.prediccionProximoCiclo}</div>
+                <div class="kpi-label">Predicción Próximo Ciclo</div>
+            </div>
+            <div class="kpi-card">
+                <div class="kpi-icon">⚠️</div>
+                <div class="kpi-value">${prediccion.factoresRiesgo.length}</div>
+                <div class="kpi-label">Factores de Riesgo</div>
+            </div>
+        </div>
+        
+        <div class="chart-grid">
+            <!-- Módulos de Alto Riesgo -->
+            <div class="chart-card">
+                <div class="chart-title">🚨 Módulos de Alto Riesgo</div>
+                ${prediccion.modulosAltoRiesgo.length === 0 ? 
+                    '<p style="color: var(--text2); text-align: center; padding: 20px;">No se han detectado módulos de alto riesgo</p>' :
+                    prediccion.modulosAltoRiesgo.map(m => `
+                        <div style="padding: 12px; background: var(--card-alt); border-radius: 8px; margin-bottom: 10px; border-left: 4px solid ${m.nivelRiesgo === 'Muy Alto' ? 'var(--danger)' : m.nivelRiesgo === 'Alto' ? 'var(--warning)' : 'var(--info)'};">
+                            <div style="font-weight: 600; margin-bottom: 6px;">${m.modulo}</div>
+                            <div style="font-size: 0.85rem; color: var(--text2);">
+                                ${m.totalBugs} bugs (${m.bugsCriticos} críticos) · Riesgo: ${m.nivelRiesgo}
+                            </div>
+                            <div style="margin-top: 8px; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden;">
+                                <div style="width: ${m.ratioCriticos}%; height: 100%; background: ${m.nivelRiesgo === 'Muy Alto' ? 'var(--danger)' : m.nivelRiesgo === 'Alto' ? 'var(--warning)' : 'var(--info)'};"></div>
+                            </div>
+                        </div>
+                    `).join('')
+                }
+            </div>
+            
+            <!-- Factores de Riesgo -->
+            <div class="chart-card">
+                <div class="chart-title">️ Factores de Riesgo Detectados</div>
+                ${prediccion.factoresRiesgo.length === 0 ? 
+                    '<p style="color: var(--success); text-align: center; padding: 20px;">✅ No se han detectado factores de riesgo significativos</p>' :
+                    prediccion.factoresRiesgo.map(f => `
+                        <div style="padding: 12px; background: var(--card-alt); border-radius: 8px; margin-bottom: 10px; display: flex; align-items: center; gap: 12px;">
+                            <div style="width: 40px; height: 40px; border-radius: 50%; background: ${f.nivel === 'Alto' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)'}; display: flex; align-items: center; justify-content: center; font-size: 1.2rem;">
+                                ${f.nivel === 'Alto' ? '' : '🟡'}
+                            </div>
+                            <div style="flex: 1;">
+                                <div style="font-weight: 600; font-size: 0.9rem;">${f.tipo}</div>
+                                <div style="font-size: 0.8rem; color: var(--text2);">${f.descripcion}</div>
+                            </div>
+                        </div>
+                    `).join('')
+                }
+            </div>
+        </div>
+        
+        <!-- Análisis de Cobertura por Requisito -->
+        <h2 style="margin-top: 30px; margin-bottom: 15px; font-size: 1.3rem;">📊 Análisis de Cobertura Inteligente</h2>
+        <div class="chart-grid">
+            ${coberturaIA.slice(0, 6).map(a => `
+                <div class="chart-card">
+                    <div class="chart-title">📋 ${a.requisito.titulo}</div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 15px;">
+                        <div style="text-align: center; padding: 10px; background: var(--card-alt); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: var(--accent);">${a.cobertura}%</div>
+                            <div style="font-size: 0.75rem; color: var(--text2);">Cobertura</div>
+                        </div>
+                        <div style="text-align: center; padding: 10px; background: var(--card-alt); border-radius: 8px;">
+                            <div style="font-size: 1.5rem; font-weight: 700; color: ${a.scoreCalidad >= 75 ? 'var(--success)' : a.scoreCalidad >= 50 ? 'var(--warning)' : 'var(--danger)'};">${a.scoreCalidad}</div>
+                            <div style="font-size: 0.75rem; color: var(--text2);">Score Calidad</div>
+                        </div>
+                    </div>
+                    <div style="font-size: 0.85rem; color: var(--text2); margin-bottom: 10px;">
+                        ${a.casosTotales} casos · ${a.bugsTotales} bugs
+                    </div>
+                    <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                        <span class="badge ${a.nivelRiesgo === 'Alto' ? 'badge-danger' : a.nivelRiesgo === 'Medio' ? 'badge-warning' : 'badge-success'}">
+                            Riesgo: ${a.nivelRiesgo}
+                        </span>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+        
+        <!-- Acciones Rápidas de IA -->
+        <h2 style="margin-top: 30px; margin-bottom: 15px; font-size: 1.3rem;">🛠️ Herramientas de IA</h2>
+        <div class="chart-grid">
+            <div class="chart-card" style="cursor: pointer;" onclick="analizarDuplicadosIA()">
+                <div class="chart-title">🔍 Analizar Bugs Duplicados</div>
+                <p style="color: var(--text2); font-size: 0.9rem;">Detectar bugs similares que podrían ser duplicados</p>
+                <button class="btn btn-accent" style="width: 100%; margin-top: 10px;">Ejecutar Análisis</button>
+            </div>
+            
+            <div class="chart-card" style="cursor: pointer;" onclick="generarSugerenciasIA()">
+                <div class="chart-title">💡 Generar Sugerencias de Casos</div>
+                <p style="color: var(--text2); font-size: 0.9rem;">Sugerencias automáticas basadas en requisitos y bugs</p>
+                <button class="btn btn-accent" style="width: 100%; margin-top: 10px;">Generar Sugerencias</button>
+            </div>
+            
+            <div class="chart-card" style="cursor: pointer;" onclick="clasificarSeveridadIA()">
+                <div class="chart-title">🎯 Clasificar Severidad Automática</div>
+                <p style="color: var(--text2); font-size: 0.9rem;">Clasificación inteligente de bugs existentes</p>
+                <button class="btn btn-accent" style="width: 100%; margin-top: 10px;">Clasificar Bugs</button>
+            </div>
+        </div>`;
+    
+    return html;
+}
+
+// Funciones de acciones rápidas
+window.analizarDuplicadosIA = function() {
+    const bugs = filterByProject(appData.bugs);
+    const duplicados = [];
+    
+    for (let i = 0; i < bugs.length; i++) {
+        for (let j = i + 1; j < bugs.length; j++) {
+            const similitud = calcularSimilitud(bugs[i].titulo, bugs[j].titulo);
+            if (similitud >= 70) {
+                duplicados.push({
+                    bug1: bugs[i],
+                    bug2: bugs[j],
+                    similitud: similitud
+                });
+            }
+        }
+    }
+    
+    const container = document.getElementById('modalContainer');
+    container.innerHTML = `
+        <div class="modal-overlay">
+            <div class="modal" style="max-width: 900px;">
+                <h3>🔍 Análisis de Bugs Duplicados</h3>
+                <p style="color: var(--text2); margin-bottom: 20px;">Se han analizado ${bugs.length} bugs y se han detectado ${duplicados.length} posibles duplicados</p>
+                
+                ${duplicados.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: var(--success);"><div style="font-size: 3rem; margin-bottom: 10px;">✅</div><p>No se han detectado bugs duplicados</p></div>' :
+                    `<div style="max-height: 500px; overflow-y: auto;">
+                        ${duplicados.map((d, idx) => `
+                            <div style="padding: 15px; background: var(--card-alt); border-radius: 8px; margin-bottom: 12px; border-left: 4px solid ${d.similitud >= 90 ? 'var(--danger)' : 'var(--warning)'};">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <strong style="color: var(--accent);">Duplicado #${idx + 1}</strong>
+                                    <span class="badge ${d.similitud >= 90 ? 'badge-danger' : 'badge-warning'}">${d.similitud}% similar</span>
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                                    <div>
+                                        <div style="font-size: 0.75rem; color: var(--text2); margin-bottom: 4px;">Bug 1</div>
+                                        <div style="font-weight: 600;">${d.bug1.titulo}</div>
+                                        <div style="font-size: 0.8rem; color: var(--text2); margin-top: 4px;">${d.bug1.id}</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 0.75rem; color: var(--text2); margin-bottom: 4px;">Bug 2</div>
+                                        <div style="font-weight: 600;">${d.bug2.titulo}</div>
+                                        <div style="font-size: 0.8rem; color: var(--text2); margin-top: 4px;">${d.bug2.id}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>`
+                }
+                
+                <div class="modal-actions">
+                    <button class="btn btn-outline" onclick="closeModal()">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window.generarSugerenciasIA = function() {
+    const requisitos = filterByProject(appData.requisitos);
+    const casos = filterByProject(appData.casos);
+    const bugs = filterByProject(appData.bugs);
+    
+    const todasSugerencias = [];
+    requisitos.forEach(req => {
+        const sugerencias = sugerirCasosPrueba(req, casos, bugs);
+        sugerencias.forEach(s => {
+            todasSugerencias.push({ ...s, requisito: req });
+        });
+    });
+    
+    const container = document.getElementById('modalContainer');
+    container.innerHTML = `
+        <div class="modal-overlay">
+            <div class="modal" style="max-width: 900px;">
+                <h3>💡 Sugerencias de Casos de Prueba</h3>
+                <p style="color: var(--text2); margin-bottom: 20px;">Se han generado ${todasSugerencias.length} sugerencias basadas en análisis de requisitos y bugs</p>
+                
+                ${todasSugerencias.length === 0 ? 
+                    '<div style="text-align: center; padding: 40px; color: var(--text2);"><div style="font-size: 3rem; margin-bottom: 10px;">📝</div><p>No hay sugerencias disponibles. Crea más requisitos y bugs para obtener sugerencias.</p></div>' :
+                    `<div style="max-height: 500px; overflow-y: auto;">
+                        ${todasSugerencias.map((s, idx) => `
+                            <div style="padding: 15px; background: var(--card-alt); border-radius: 8px; margin-bottom: 12px;">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                                    <strong style="color: var(--accent);">Sugerencia #${idx + 1}</strong>
+                                    <span class="badge ${s.prioridad === 'Alta' ? 'badge-danger' : s.prioridad === 'Media' ? 'badge-warning' : 'badge-info'}">${s.prioridad}</span>
+                                </div>
+                                <div style="font-weight: 600; margin-bottom: 6px;">${s.titulo}</div>
+                                <div style="font-size: 0.85rem; color: var(--text2); margin-bottom: 8px;">${s.descripcion}</div>
+                                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                                    <span class="badge badge-purple">${s.requisito.id}</span>
+                                    <span class="badge badge-info">${s.tipo}</span>
+                                    <span style="font-size: 0.75rem; color: var(--text2);">💡 ${s.razon}</span>
+                                </div>
+                                <button class="btn btn-sm btn-accent" style="margin-top: 10px;" onclick="crearCasoDesdeSugerencia('${s.requisito.id}', '${s.titulo.replace(/'/g, "\\'")}', '${s.descripcion.replace(/'/g, "\\'")}', '${s.prioridad}')">
+                                     Crear Caso
+                                </button>
+                            </div>
+                        `).join('')}
+                    </div>`
+                }
+                
+                <div class="modal-actions">
+                    <button class="btn btn-outline" onclick="closeModal()">Cerrar</button>
+                </div>
+            </div>
+        </div>
+    `;
+};
+
+window.crearCasoDesdeSugerencia = function(requisitoId, titulo, descripcion, prioridad) {
+    closeModal();
+    openModal('casos');
+    setTimeout(() => {
+        document.getElementById('f_titulo').value = titulo;
+        document.getElementById('f_descripcion').value = descripcion;
+        document.getElementById('f_prioridad').value = prioridad;
+        document.getElementById('f_requisito').value = requisitoId;
+    }, 100);
+};
+
+window.clasificarSeveridadIA = function() {
+    const bugs = filterByProject(appData.bugs).filter(b => !b.severidad || b.severidad === 'Menor');
+    
+    if (bugs.length === 0) {
+        toast('No hay bugs sin clasificar o todos ya tienen severidad asignada', 'info');
+        return;
+    }
+    
+    let clasificados = 0;
+    bugs.forEach(bug => {
+        const clasificacion = clasificarSeveridadAutomatica(bug.titulo, bug.descripcion, bug.resumen);
+        if (clasificacion.confianza >= 50) {
+            bug.severidad = clasificacion.severidad;
+            bug.severidadIA = true;
+            clasificados++;
+        }
+    });
+    
+    saveData();
+    renderPage('ia');
+    toast(`Se han clasificado ${clasificados} bugs automáticamente`, 'success');
+};
 
     function handleAction(page, action, id) {
         if (action === 'create') openModal(page);
@@ -1074,18 +2344,18 @@
             </div>
             </div>`;
         container.innerHTML = html;
-        
+
         const okBtn = document.getElementById('confirmOkBtn');
         okBtn.addEventListener('click', () => {
             closeModal();
             if (onConfirm) onConfirm();
         });
-        
+
         if (showCancel) {
             const cancelBtn = document.getElementById('confirmCancelBtn');
             cancelBtn.addEventListener('click', closeModal);
         }
-        
+
         document.addEventListener('keydown', escCloseModal);
     }
     window.openModal = function (page, id, viewOnly = false) {
@@ -1120,15 +2390,15 @@
         document.removeEventListener('keydown', escCloseModal);
     };
 
-    function escCloseModal(e) { 
+    function escCloseModal(e) {
         if (e.key === 'Escape') {
             // ✅ No permitir cerrar con ESC si es el modal de restricción de acceso
             const container = document.getElementById('modalContainer');
             if (container.innerHTML.includes('handleLogout()') && container.innerHTML.includes('Acceso Restringido')) {
                 return; // Bloquear cierre
             }
-            closeModal(); 
-        } 
+            closeModal();
+        }
     }
 
     function generateForm(page, id, viewOnly) {
@@ -1148,7 +2418,7 @@
             return opts;
         };
 
-        window.toggleProjectPermissions = function() {
+        window.toggleProjectPermissions = function () {
             const roleSelect = document.getElementById('f_rol');
             const permDiv = document.getElementById('project-permissions');
             if (permDiv && roleSelect) {
@@ -1190,7 +2460,7 @@
         let h = '';
         switch (page) {
             case 'proyectos':
-            h += `<div class="form-group"><label>ID Proyecto</label><input value="${item?.id || 'PROY-' + Date.now()}" ${d} id="f_id"></div>
+                h += `<div class="form-group"><label>ID Proyecto</label><input value="${item?.id || 'PROY-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Nombre *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
                 <div class="form-group"><label>Código Cliente</label><input value="${item?.codigoCliente || ''}" ${d} id="f_codigoCliente"></div>
                 <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
@@ -1203,9 +2473,9 @@
                 <option ${item?.estado === 'Completado' ? 'selected' : ''}>Completado</option>
                 </select></div>
                 `;
-            break;
+                break;
             case 'objetivos':
-            h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'OBJ-' + Date.now()}" ${d} id="f_id"></div>
+                h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'OBJ-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Objetivo *</label><input value="${item?.objetivo || ''}" ${d} id="f_objetivo"></div>
                 <div class="form-group"><label>Descripción</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
                 <div class="form-group"><label>Responsable</label><select ${d} id="f_responsable">${userOpts(item?.responsable)}</select></div>
@@ -1217,12 +2487,12 @@
                 <option ${item?.estado === 'Finalizado' ? 'selected' : ''}>Finalizado</option>
                 </select></div>
                 `;
-            break;
+                break;
             case 'mejoras':
-            const categoriasMejora = ['Proceso QA', 'Herramientas', 'Automatización', 'Formación', 'Documentación', 'Infraestructura', 'Metodología', 'Otro'];
-            const impactos = ['Alto', 'Medio', 'Bajo'];
-            const estadosMejora = ['Propuesta', 'En evaluación', 'Aprobada', 'En implementación', 'Implementada', 'Descartada'];
-            h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'MEJ-' + Date.now()}" ${d} id="f_id"></div>
+                const categoriasMejora = ['Proceso QA', 'Herramientas', 'Automatización', 'Formación', 'Documentación', 'Infraestructura', 'Metodología', 'Otro'];
+                const impactos = ['Alto', 'Medio', 'Bajo'];
+                const estadosMejora = ['Propuesta', 'En evaluación', 'Aprobada', 'En implementación', 'Implementada', 'Descartada'];
+                h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'MEJ-' + Date.now()}" ${d} id="f_id"></div>
             <div class="form-group"><label>Título de la Mejora *</label><input value="${item?.titulo || ''}" ${d} id="f_titulo" placeholder="Ej: Implementar tests automatizados con Cypress"></div>
             <div class="form-group"><label>Categoría</label><select ${d} id="f_categoria">
                 ${categoriasMejora.map(c => `<option ${item?.categoria === c ? 'selected' : ''}>${c}</option>`).join('')}
@@ -1251,15 +2521,15 @@
             </div>
             <div class="form-group"><label>Notas / Comentarios adicionales</label><textarea ${d} id="f_notas" rows="2">${item?.notas || ''}</textarea></div>
             `;
-            if (id) {
-                h += `<div id="commentsContainer_mejora_${id}"></div>`;
-                setTimeout(() => { renderCommentsSection('mejora', id); }, 50);
-            }
-            break;
+                if (id) {
+                    h += `<div id="commentsContainer_mejora_${id}"></div>`;
+                    setTimeout(() => { renderCommentsSection('mejora', id); }, 50);
+                }
+                break;
             case 'usuarios':
-            const isConsultor = item?.rol === 'Consultor';
-            const proyectosAutorizados = item?.proyectosAutorizados || [];
-            h += `<div class="form-group"><label>ID</label><input value="${item?.id || Date.now()}" ${d} id="f_id" type="number"></div>
+                const isConsultor = item?.rol === 'Consultor';
+                const proyectosAutorizados = item?.proyectosAutorizados || [];
+                h += `<div class="form-group"><label>ID</label><input value="${item?.id || Date.now()}" ${d} id="f_id" type="number"></div>
                 <div class="form-group"><label>Nombre completo *</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
                 <div class="form-group"><label>Usuario *</label><input value="${item?.usuario || ''}" ${d} id="f_usuario"></div>
                 <div class="form-group"><label>Contraseña *</label><input type="password" value="${item?.password || ''}" ${d} id="f_password"></div>
@@ -1267,7 +2537,7 @@
                 <div class="form-group" id="project-permissions" style="${isConsultor ? '' : 'display:none;'}">
                     <label>📁 Proyectos Autorizados</label>
                     <div class="checkbox-list" style="max-height:200px; overflow-y:auto; border:1px solid var(--border); border-radius:8px; padding:10px;">
-                        ${appData.proyectos.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay proyectos creados</div>' : 
+                        ${appData.proyectos.length === 0 ? '<div style="color:var(--text2); font-size:0.85rem;">No hay proyectos creados</div>' :
                         appData.proyectos.map(p => `
                             <label class="checkbox-item" style="display:flex; align-items:center; gap:8px; padding:6px 0;">
                                 <input type="checkbox" class="project-perm-cb" value="${p.id}" ${proyectosAutorizados.includes(p.id) ? 'checked' : ''}>
@@ -1277,8 +2547,8 @@
                     </div>
                     <small style="color:var(--text2); display:block; margin-top:8px;">Selecciona los proyectos que este consultor podrá ver y gestionar</small>
                 </div>`;
-                break;            
-                case 'casos':
+                break;
+            case 'casos':
                 h += `<div class="form-group"><label>ID Caso</label><input value="${item?.id || 'CASO-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
                 
@@ -1286,9 +2556,9 @@
                     <label> Requisito Asociado</label>
                     <select ${d} id="f_requisito">
                         <option value="">Sin requisito...</option>
-                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r => 
-                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
-                        ).join('')}
+                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r =>
+                    `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                ).join('')}
                     </select>
                 </div>
                 
@@ -1330,7 +2600,7 @@
                     }, 50);
                 }
                 break;
-                case 'bugs':
+            case 'bugs':
                 h += `<div class="form-group"><label>ID Bug</label><input value="${item?.id || 'BUG-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Proyecto</label><select ${d} id="f_proyecto">${projOpts}</select></div>
                 <div class="form-group"><label>Caso Relacionado</label><input value="${item?.casoRelacionado || ''}" ${d} id="f_casoRelacionado"></div>
@@ -1343,6 +2613,7 @@
                 <option ${item?.severidad === 'Mayor' ? 'selected' : ''}>Mayor</option>
                 <option ${item?.severidad === 'Menor' ? 'selected' : ''}>Menor</option>
                 </select></div>
+                <button type="button" class="btn btn-sm btn-outline" onclick="autoClasificarSeveridad()" style="margin-top: 8px;">🤖 Clasificar Automáticamente</button>
                 <div class="form-group"><label>Estado</label><select ${d} id="f_estado">
                 <option ${item?.estado === 'Abierto' ? 'selected' : ''}>Abierto</option>
                 <option ${item?.estado === 'En revisión' ? 'selected' : ''}>En revisión</option>
@@ -1366,8 +2637,53 @@
                         renderCommentsSection('bug', id);
                     }, 50);
                 }
+                if (!id) {
+                    h += `<div id="ia-duplicados-container" style="margin-top: 20px;"></div>`;
+                    h += `<script>
+                        setTimeout(() => {
+                            const tituloInput = document.getElementById('f_titulo');
+                            const descInput = document.getElementById('f_descripcion');
+                            const resumenInput = document.getElementById('f_resumen');
+                            
+                            function verificarDuplicados() {
+                                const bugNuevo = {
+                                    titulo: tituloInput?.value || '',
+                                    descripcion: descInput?.value || '',
+                                    resumen: resumenInput?.value || ''
+                                };
+                                
+                                if (bugNuevo.titulo.length < 5) return;
+                                
+                                const duplicados = detectarBugsDuplicados(bugNuevo, appData.bugs.filter(b => b.estado !== 'Solucionado'), 70);
+                                const container = document.getElementById('ia-duplicados-container');
+                                
+                                if (duplicados.length > 0) {
+                                    container.innerHTML = \`
+                                        <div style="padding: 15px; background: rgba(245, 158, 11, 0.1); border-radius: 8px; border-left: 4px solid var(--warning);">
+                                            <div style="font-weight: 600; color: var(--warning); margin-bottom: 10px;">️ Posibles bugs duplicados detectados</div>
+                                            \${duplicados.slice(0, 3).map(d => \`
+                                                <div style="padding: 8px; background: var(--card-alt); border-radius: 6px; margin-bottom: 6px; font-size: 0.85rem;">
+                                                    <div style="display: flex; justify-content: space-between;">
+                                                        <strong>\${d.bug.titulo}</strong>
+                                                        <span class="badge badge-warning">\${d.similitud}%</span>
+                                                    </div>
+                                                </div>
+                                            \`).join('')}
+                                        </div>
+                                    \`;
+                                } else {
+                                    container.innerHTML = '';
+                                }
+                            }
+                            
+                            tituloInput?.addEventListener('input', verificarDuplicados);
+                            descInput?.addEventListener('input', verificarDuplicados);
+                            resumenInput?.addEventListener('input', verificarDuplicados);
+                        }, 100);
+                    </script>`;
+                }
                 break;
-                case 'ejecuciones':
+            case 'ejecuciones':
                 const requisitosDisponibles = appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject());
                 const casosAsociados = item?.casosAsociados ? (() => {
                     try {
@@ -1388,9 +2704,9 @@
                     <label>📋 Requisito (Grupo de Casos)</label>
                     <select ${d} id="f_requisito" onchange="cargarCasosDeRequisito()">
                         <option value="">Seleccionar requisito...</option>
-                        ${requisitosDisponibles.map(r => 
-                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
-                        ).join('')}
+                        ${requisitosDisponibles.map(r =>
+                    `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                ).join('')}
                     </select>
                     <small style="color:var(--text2); display:block; margin-top:6px;">
                         Al seleccionar un requisito, se incluirán automáticamente todos sus casos asociados
@@ -1415,7 +2731,7 @@
 
                 <div class="form-group"><label>📝 Notas Generales del Ciclo</label><textarea ${d} id="f_comentarios" placeholder="Notas sobre el entorno, versión u observaciones...">${item?.comentarios || ''}</textarea></div>`;
                 break;
-                case 'diario':
+            case 'diario':
                 h += `<div class="form-group"><label>ID</label><input value="${item?.id || 'DIA-' + Date.now()}" ${d} id="f_id"></div>
                     <div class="form-group"><label>Colaborador QA</label><select ${d} id="f_colaborador">${userOpts(item?.colaborador || currentUser?.nombre)}</select></div>
                     <div class="form-group"><label>Mes</label><input type="month" value="${item?.mes || ''}" ${d} id="f_mes"></div>
@@ -1423,10 +2739,43 @@
                     <div class="form-group"><label>Descripción de actividad</label><textarea ${d} id="f_descripcion">${item?.descripcion || ''}</textarea></div>
                     <div class="form-group"><label>Horas invertidas</label><input type="number" step="0.5" value="${item?.horas || ''}" ${d} id="f_horas"></div>`;
                 break;
-                case 'capturas':
+            case 'capturas':
+                    const getCasosBugsApisOpts = (selectedValue) => {
+                    let opts = '<option value="">Ninguno / Seleccionar...</option>';
+                    
+                    // Casos de Prueba
+                    if (appData.casos && appData.casos.length > 0) {
+                        opts += '<optgroup label="📋 Casos de Prueba">';
+                        appData.casos.forEach(c => {
+                            opts += `<option value="caso_${c.id}" ${selectedValue === 'caso_' + c.id ? 'selected' : ''}>${c.id} - ${c.titulo}</option>`;
+                        });
+                        opts += '</optgroup>';
+                    }
+                    
+                    // Bugs
+                    if (appData.bugs && appData.bugs.length > 0) {
+                        opts += '<optgroup label="🐛 Bugs / Defectos">';
+                        appData.bugs.forEach(b => {
+                            opts += `<option value="bug_${b.id}" ${selectedValue === 'bug_' + b.id ? 'selected' : ''}>${b.id} - ${b.titulo}</option>`;
+                        });
+                        opts += '</optgroup>';
+                    }
+                    
+                    // APIs - NUEVO
+                    if (appData.apis && appData.apis.length > 0) {
+                        opts += '<optgroup label=" APIs">';
+                        appData.apis.forEach(api => {
+                            opts += `<option value="api_${api.id}" ${selectedValue === 'api_' + api.id ? 'selected' : ''}>${api.id} - ${api.nombre || api.endpoint}</option>`;
+                        });
+                        opts += '</optgroup>';
+                    }
+                    
+                    return opts;
+                };
                 h += `<div class="form-group"><label>ID Captura</label><input value="${item?.id || 'CAP-' + Date.now()}" id="f_id" ${d}></div>
-                <div class="form-group"><label>Descripción del Error/Evidencia</label><input value="${item?.descripcion || ''}" id="f_descripcion" ${d}></div>
-                <div class="form-group"><label>🔗 ID Caso o Bug Vinculado</label><select id="f_vinculo" ${d}>${getCasosBugsOpts(item?.vinculo)}</select></div>
+                <div class="form-group"><label>Descripción de la Evidencia</label><input value="${item?.descripcion || ''}" id="f_descripcion" ${d} placeholder="Ej: Error 500 en endpoint /api/users"></div>
+                <div class="form-group"><label>🔗 Vincular con</label><select id="f_vinculo" ${d}>${getCasosBugsApisOpts(item?.vinculo)}</select>
+                <small style="color:var(--text2); display:block; margin-top:6px;">Puedes vincular esta captura a un Caso, Bug o API</small></div>
                 <div class="form-group">
                     <label>Subir Imagen</label>
                     <input type="file" id="f_archivos" accept="image/*" onchange="previsualizarCapturaQA(event, 'preview-box')" style="padding: 5px;" ${d}>
@@ -1434,21 +2783,32 @@
                     <input type="hidden" id="f_archivos_base64" value="${item?.archivos || ''}">
                 </div>`;
                 break;
-                case 'apis':
+            case 'apis':
+                let fechaEjecucionVal = '';
+                if (item?.fechaEjecucion) {
+                    const str = String(item.fechaEjecucion);
+                    if (str.match(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/)) {
+                        fechaEjecucionVal = str.slice(0, 16);
+                    } else {
+                        const d = new Date(str);
+                        if (!isNaN(d.getTime())) {
+                            const offset = d.getTimezoneOffset() * 60000;
+                            fechaEjecucionVal = new Date(d.getTime() - offset).toISOString().slice(0, 16);
+                        }
+                    }
+                }
                 h += `<div class="form-group"><label>ID API</label><input value="${item?.id || 'API-' + Date.now()}" ${d} id="f_id"></div>
                 <div class="form-group"><label>Nombre API</label><input value="${item?.nombre || ''}" ${d} id="f_nombre"></div>
-
                 <!-- NUEVO: Selector de Requisito -->
                 <div class="form-group">
                     <label>📋 Requisito Asociado</label>
                     <select ${d} id="f_requisito">
                         <option value="">Sin requisito...</option>
-                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r => 
-                            `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
-                        ).join('')}
+                        ${appData.requisitos.filter(r => !r.proyecto || r.proyecto === getActiveProject()).map(r =>
+                        `<option value="${r.id}" ${item?.requisito === r.id ? 'selected' : ''}>${r.id} - ${r.titulo}</option>`
+                    ).join('')}
                     </select>
                 </div>
-
                 <div style="display:grid; grid-template-columns: 1fr 1fr; gap:15px;">
                     <div class="form-group"><label>Endpoint</label><input value="${item?.endpoint || ''}" ${d} id="f_endpoint"></div>
                     <div class="form-group"><label>Método</label><select ${d} id="f_metodo">
@@ -1478,20 +2838,40 @@
                 </div>
                 <div class="form-group">
                     <label>Fecha de Ejecución</label>
-                    <input type="datetime-local" value="${item?.fechaEjecucion ? new Date(item.fechaEjecucion).toISOString().slice(0, 16) : ''}" ${d} id="f_fechaEjecucion">
+                    <input type="datetime-local" value="${fechaEjecucionVal}" ${d} id="f_fechaEjecucion">
                 </div>
-                ${!viewOnly ? `<button type="button" class="btn btn-outline" onclick="validarEvidenciaApi()" style="width:100%; margin-top:10px; border-color: var(--accent2); color: var(--accent2);">🔄 Validar JSON y Actualizar Estado Automáticamente</button>` : ''}
-                <div class="form-group" style="margin-top:15px;"><label>Estado Final</label><select ${d} id="f_estado">
-                <option ${item?.estado === 'Correcta' ? 'selected' : ''}>Correcta</option>
-                <option ${item?.estado === 'Error' ? 'selected' : ''}>Error</option>
-                <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
-                </select></div>
+                <div class="form-group" style="margin-top:15px;">
+                    <label>Estado Final</label>
+                    <select ${d} id="f_estado">
+                        <option ${item?.estado === 'Correcta' ? 'selected' : ''}>Correcta</option>
+                        <option ${item?.estado === 'Error' ? 'selected' : ''}>Error</option>
+                        <option ${item?.estado === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                    </select>
+                </div>
                 `;
                 if (id) {
                     h += `<div id="commentsContainer_api_${id}"></div>`;
                     setTimeout(() => {
                         renderCommentsSection('api', id);
                     }, 50);
+                    
+                    // Mostrar capturas vinculadas
+                    const apiCapturas = appData.capturas.filter(c => c.vinculo === 'api_' + id);
+                    if (apiCapturas.length > 0) {
+                        h += `<div class="form-group" style="margin-top:20px;">
+                            <label> Capturas QA Vinculadas (${apiCapturas.length})</label>
+                            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap:12px; margin-top:10px;">`;
+                        
+                        apiCapturas.forEach(cap => {
+                            h += `<div style="position:relative; background:var(--bg2); border-radius:8px; overflow:hidden; border:1px solid var(--border);">
+                                <img src="${cap.archivos}" style="width:100%; height:120px; object-fit:cover; cursor:pointer;" onclick="window.open('${cap.archivos}', '_blank')">
+                                <div style="padding:8px; font-size:0.75rem; color:var(--text2);">${cap.descripcion || 'Sin descripción'}</div>
+                                <button onclick="window.openModal('capturas', '${cap.id}')" style="position:absolute; top:5px; right:5px; background:rgba(0,0,0,0.7); border:none; color:#fff; width:28px; height:28px; border-radius:50%; cursor:pointer;">👁️</button>
+                            </div>`;
+                        });
+                        
+                        h += `</div></div>`;
+                    }
                 }
                 break;
                 case 'requisitos':
@@ -1509,33 +2889,77 @@
                     <option ${item?.prioridad === 'Media' ? 'selected' : ''}>Media</option>
                     <option ${item?.prioridad === 'Baja' ? 'selected' : ''}>Baja</option>
                 </select></div>
+
+                <!-- NUEVO: Subida de Documentos -->
+                <div class="form-group" style="margin-top:20px; padding:20px; background:var(--card-alt); border-radius:12px; border:2px dashed var(--border);">
+                    <label style="color:var(--accent); font-weight:600;"> Documentos del Requisito</label>
+                    <p style="font-size:0.85rem; color:var(--text2); margin:8px 0;">Sube documentos (PDF, DOCX, TXT) para que la IA genere casos de uso automáticamente</p>
+                    <input type="file" id="f_documento" accept=".txt,.pdf,.doc,.docx" ${d} 
+                        style="width:100%; padding:12px; background:var(--bg); border:2px dashed var(--border); border-radius:8px; cursor:pointer;"
+                        onchange="handleDocumentoUpload(this)">
+                    ${item?.documento ? `
+                    <div style="margin-top:12px; padding:12px; background:var(--bg); border-radius:8px; display:flex; align-items:center; justify-content:space-between;">
+                        <div style="display:flex; align-items:center; gap:10px;">
+                            <span style="font-size:1.5rem;">📄</span>
+                            <div>
+                                <div style="font-weight:600; font-size:0.9rem;">Documento adjunto</div>
+                                <div style="font-size:0.75rem; color:var(--text2);">${item.nombreDocumento || 'documento'}</div>
+                            </div>
+                        </div>
+                        <button type="button" class="btn btn-sm btn-outline" onclick="eliminarDocumento()" ${d === 'disabled' ? 'style="display:none"' : ''}>🗑️</button>
+                    </div>
+                    ` : ''}
+                </div>
+
+                ${item?.documento ? `
+                <div class="form-group" style="margin-top:15px;">
+                    <button type="button" class="btn btn-accent" style="width:100%;" onclick="analizarDocumentoIA()">
+                        🤖 Analizar con IA y Generar Casos
+                    </button>
+                </div>
+                ` : ''}
                 `;
-                break;
-        }
+                break;}
         return h;
     }
 
+    window.autoClasificarSeveridad = function() {
+        const titulo = document.getElementById('f_titulo')?.value || '';
+        const descripcion = document.getElementById('f_descripcion')?.value || '';
+        const resumen = document.getElementById('f_resumen')?.value || '';
+        
+        if (!titulo) {
+            toast('Escribe un título primero', 'warning');
+            return;
+        }
+        
+        const clasificacion = clasificarSeveridadAutomatica(titulo, descripcion, resumen);
+        document.getElementById('f_severidad').value = clasificacion.severidad;
+        
+        toast(` Severidad clasificada: ${clasificacion.severidad} (${clasificacion.confianza}% confianza)`, 'success');
+    };
+
     // ✅ NUEVA FUNCIÓN: Cargar automáticamente los casos de un requisito
-    window.cargarCasosDeRequisito = function() {
+    window.cargarCasosDeRequisito = function () {
         const requisitoId = document.getElementById('f_requisito').value;
         const container = document.getElementById('casosContainer');
-        
+
         if (!requisitoId) {
             container.innerHTML = '<div style="color:var(--text2); font-size:0.85rem;">Selecciona un requisito para cargar los casos</div>';
             return;
         }
-        
+
         // Filtrar casos del proyecto activo que pertenezcan a este requisito
-        const casosDelRequisito = appData.casos.filter(c => 
-            c.requisito === requisitoId && 
+        const casosDelRequisito = appData.casos.filter(c =>
+            c.requisito === requisitoId &&
             (!getActiveProject() || c.proyecto === getActiveProject())
         );
-        
+
         if (casosDelRequisito.length === 0) {
             container.innerHTML = '<div style="color:var(--warning); font-size:0.85rem;">⚠️ No hay casos asociados a este requisito</div>';
             return;
         }
-        
+
         // Renderizar los casos como checkboxes (deshabilitados para evitar modificación manual)
         container.innerHTML = casosDelRequisito.map(c => `
             <label class="checkbox-item">
@@ -1543,13 +2967,13 @@
                 <span><b>${c.id}</b> - ${c.titulo}</span>
             </label>
         `).join('');
-        
+
         toast(`✅ Se han cargado ${casosDelRequisito.length} casos del requisito`, 'success');
     };
 
 
     // ============ VALIDADOR DE EVIDENCIAS API (POSTMAN) ============
-    window.validarEvidenciaApi = function() {
+    window.validarEvidenciaApi = function () {
         const esperadaStr = document.getElementById('f_respEsperada').value.trim();
         const realStr = document.getElementById('f_responseReal').value.trim();
         const statusInput = document.getElementById('f_statusCode');
@@ -1643,19 +3067,19 @@
         if (page === 'ejecuciones') {
             // Obtener el requisito seleccionado
             const requisitoId = document.getElementById('f_requisito').value;
-            
+
             // Obtener todos los casos del requisito (automáticamente)
-            const casosDelRequisito = appData.casos.filter(c => 
-                c.requisito === requisitoId && 
+            const casosDelRequisito = appData.casos.filter(c =>
+                c.requisito === requisitoId &&
                 (!getActiveProject() || c.proyecto === getActiveProject())
             );
-            
+
             // Crear el array de casos asociados con estado "Pendiente"
             const newCasesData = casosDelRequisito.map(c => ({
                 id: c.id,
                 status: 'Pendiente'
             }));
-            
+
             data.casosAsociados = JSON.stringify(newCasesData);
             data.requisito = requisitoId; // Guardar el requisito vinculado
         }
@@ -1674,6 +3098,22 @@
                 data.proyectosAutorizados = [];
             }
         }
+
+        if (page === 'requisitos') {
+            // Guardar documento si existe
+            const tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
+            if (tempDoc) {
+                const docData = JSON.parse(tempDoc);
+                data.documento = docData.contenido;
+                data.nombreDocumento = docData.nombre;
+                data.tipoDocumento = docData.tipo;
+                data.fechaDocumento = new Date().toISOString();
+                
+                // Limpiar temporal
+                sessionStorage.removeItem('temp_documento_' + getActiveProject());
+            }
+        }
+
         // Marcar quién crea el registro (aislamiento de consultores)
         if (!id) {
             // Solo en creación nueva, no al editar
@@ -1732,10 +3172,39 @@
         let filtered = searchTerm ? data.filter(i => JSON.stringify(i).toLowerCase().includes(searchTerm)) : data;
         // Ordenar si está configurado
         if (sortConfig.field) {
-            filtered.sort((a, b) =>
-                (a[sortConfig.field] || '').toString().localeCompare((b[sortConfig.field] || '').toString()) *
-                (sortConfig.dir === 'asc' ? 1 : -1)
-            );
+            filtered.sort((a, b) => {
+                let valA = a[sortConfig.field];
+                let valB = b[sortConfig.field];
+                
+                // Manejar valores null/undefined
+                if (valA == null || valA === '') valA = '';
+                if (valB == null || valB === '') valB = '';
+                
+                // Intentar ordenar como números si es posible
+                const numA = parseFloat(valA);
+                const numB = parseFloat(valB);
+                
+                if (!isNaN(numA) && !isNaN(numB) && valA !== '' && valB !== '') {
+                    // Ordenación numérica
+                    return (numA - numB) * (sortConfig.dir === 'asc' ? 1 : -1);
+                }
+                
+                // Intentar ordenar como fechas
+                const dateA = new Date(valA);
+                const dateB = new Date(valB);
+                
+                if (!isNaN(dateA.getTime()) && !isNaN(dateB.getTime())) {
+                    // Ordenación por fechas
+                    return (dateA - dateB) * (sortConfig.dir === 'asc' ? 1 : -1);
+                }
+                
+                // Ordenación alfabética por defecto (case-insensitive)
+                const strA = String(valA).toLowerCase();
+                const strB = String(valB).toLowerCase();
+                
+                return strA.localeCompare(strB, 'es', { sensitivity: 'base' }) * 
+                (sortConfig.dir === 'asc' ? 1 : -1);
+            });
         }
         const totalPages = Math.ceil(filtered.length / pageSize) || 1;
         const pg = Math.min(currentPages[page] || 1, totalPages);
@@ -1752,7 +3221,13 @@
             <span style="color:var(--text2); font-size:0.85rem;">${filtered.length} resultados</span>
             ${showActions ? `<button class="btn btn-accent btn-sm" data-action="create">➕ Nuevo</button>` : ''}
             </div><div style="overflow-x:auto;"><table><thead><tr>`;
-        cols.forEach(c => h += `<th data-sort="${c.field}">${c.label} ${sortConfig.field === c.field ? (sortConfig.dir === 'asc' ? '▲' : '▼') : ''}</th>`);
+            cols.forEach(c => {
+                if (c.field) {
+                    h += `<th data-sort="${c.field}" style="cursor:pointer;">${c.label} ${sortConfig.field === c.field ? (sortConfig.dir === 'asc' ? '▲' : '▼') : ''}</th>`;
+                } else {
+                    h += `<th>${c.label}</th>`;
+                }
+            });
         if (showActions) h += '<th style="width:120px;">Acciones</th>';
         h += '</tr></thead><tbody>';
         if (paged.length === 0) {
@@ -1805,33 +3280,37 @@
             
             const entityType = row.dataset.entityType;
             const entityId = row.dataset.entityId;
-            
             if (!entityType || !entityId) return;
             
-            // Buscar captura vinculada
-            const captura = appData.capturas.find(c => c.vinculo === entityId && c.archivos);
+            // Buscar captura vinculada - soportar múltiples tipos
+            let captura = null;
+            
+            if (entityType === 'caso') {
+                captura = appData.capturas.find(c => c.vinculo === 'caso_' + entityId && c.archivos);
+            } else if (entityType === 'bug') {
+                captura = appData.capturas.find(c => c.vinculo === 'bug_' + entityId && c.archivos);
+            } else if (entityType === 'api') {
+                captura = appData.capturas.find(c => c.vinculo === 'api_' + entityId && c.archivos);
+            }
+            
             if (!captura) return;
             
             // Mostrar tooltip
             tooltip.innerHTML = `
                 <div class="tooltip-label">📸 Captura QA Vinculada</div>
                 <img src="${captura.archivos}" alt="Captura">
+                <div style="font-size:0.75rem; color:var(--text2); margin-top:5px;">${captura.descripcion || ''}</div>
             `;
             tooltip.classList.add('visible');
         });
         
         document.addEventListener('mousemove', (e) => {
             if (!tooltip.classList.contains('visible')) return;
-            
-            // Posicionar tooltip cerca del cursor pero sin bloquear
             const x = e.clientX + 15;
             const y = e.clientY + 15;
-            
-            // Ajustar si se sale de la pantalla
             const tooltipRect = tooltip.getBoundingClientRect();
             const adjustedX = x + tooltipRect.width > window.innerWidth ? e.clientX - tooltipRect.width - 15 : x;
             const adjustedY = y + tooltipRect.height > window.innerHeight ? e.clientY - tooltipRect.height - 15 : y;
-            
             tooltip.style.left = adjustedX + 'px';
             tooltip.style.top = adjustedY + 'px';
         });
@@ -1878,7 +3357,7 @@
         return result;
     }
 
-// ============ DASHBOARD ============
+    // ============ DASHBOARD ============
     function renderDashboard() {
         const casos = getVisibleData(appData.casos);
         const bugs = getVisibleData(appData.bugs);
@@ -2047,30 +3526,30 @@ ${renderDonutChart('Severidad Bugs', [
             { label: 'Responsable', field: 'responsable' }
         ];
         return '<h1 class="page-title">💡 Mejoras para el Equipo QA</h1>' +
-        '<p class="page-subtitle">Propuestas de mejora para optimizar procesos, herramientas y metodología QA</p>' +
-        renderTable('mejoras', cols, data, i => {
-            const estadoClass = {
-                'Propuesta': 'badge-info',
-                'En evaluación': 'badge-warning',
-                'Aprobada': 'badge-purple',
-                'En implementación': 'badge-info',
-                'Implementada': 'badge-success',
-                'Descartada': 'badge-neutral'
-            }[i.estado] || 'badge-neutral';
-            
-            const prioridadClass = {
-                'Alta': 'badge-danger',
-                'Media': 'badge-warning',
-                'Baja': 'badge-info'
-            }[i.prioridad] || 'badge-info';
-            
-            return `<td><code>${i.id}</code></td>
+            '<p class="page-subtitle">Propuestas de mejora para optimizar procesos, herramientas y metodología QA</p>' +
+            renderTable('mejoras', cols, data, i => {
+                const estadoClass = {
+                    'Propuesta': 'badge-info',
+                    'En evaluación': 'badge-warning',
+                    'Aprobada': 'badge-purple',
+                    'En implementación': 'badge-info',
+                    'Implementada': 'badge-success',
+                    'Descartada': 'badge-neutral'
+                }[i.estado] || 'badge-neutral';
+
+                const prioridadClass = {
+                    'Alta': 'badge-danger',
+                    'Media': 'badge-warning',
+                    'Baja': 'badge-info'
+                }[i.prioridad] || 'badge-info';
+
+                return `<td><code>${i.id}</code></td>
                     <td><b>${i.titulo || ''}</b></td>
                     <td><span class="badge badge-purple">${i.categoria || 'Otro'}</span></td>
                     <td><span class="badge ${prioridadClass}">${i.prioridad || 'Media'}</span></td>
                     <td><span class="badge ${estadoClass}">${i.estado || 'Propuesta'}</span></td>
                     <td>${i.responsable || '<span style="color:var(--text2);">Sin asignar</span>'}</td>`;
-        });
+            });
     }
     function renderUsuarios() {
         const cols = [{ label: 'ID', field: 'id' }, { label: 'Nombre', field: 'nombre' }, { label: 'Usuario', field: 'usuario' }, { label: 'Rol', field: 'rol' }];
@@ -2079,7 +3558,16 @@ ${renderDonutChart('Severidad Bugs', [
         );
     }
     function renderCasos() {
-        const data = filterByProject(appData.casos);
+        let data = filterByProject(appData.casos);
+        
+        // --- NUEVO: Filtros ---
+        const estadoFilter = document.getElementById('filter_caso_estado')?.value || '';
+        const prioridadFilter = document.getElementById('filter_caso_prioridad')?.value || '';
+        
+        if (estadoFilter) data = data.filter(i => i.estado === estadoFilter);
+        if (prioridadFilter) data = data.filter(i => i.prioridad === prioridadFilter);
+        // ----------------------
+
         const cols = [
             { label: 'ID', field: 'id' }, 
             { label: 'Requisito', field: 'requisito' },
@@ -2089,12 +3577,31 @@ ${renderDonutChart('Severidad Bugs', [
             { label: 'Estado', field: 'estado' }
         ];
         
-        return '<h1 class="page-title">📋 Casos de Uso</h1>' + 
-        renderTable('casos', cols, data, i => {
+        // Renderizamos la tabla con los controles de filtro arriba
+        let html = '<h1 class="page-title">📋 Casos de Uso</h1>';
+        
+        // Controles de Filtro
+        html += `<div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+            <select id="filter_caso_estado" onchange="renderPage('casos')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todos los Estados</option>
+                <option value="Pendiente" ${estadoFilter === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+                <option value="Pasado" ${estadoFilter === 'Pasado' ? 'selected' : ''}>Pasado</option>
+                <option value="Fallido" ${estadoFilter === 'Fallido' ? 'selected' : ''}>Fallido</option>
+            </select>
+            <select id="filter_caso_prioridad" onchange="renderPage('casos')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todas las Prioridades</option>
+                <option value="Crítica" ${prioridadFilter === 'Crítica' ? 'selected' : ''}>Crítica</option>
+                <option value="Alta" ${prioridadFilter === 'Alta' ? 'selected' : ''}>Alta</option>
+                <option value="Media" ${prioridadFilter === 'Media' ? 'selected' : ''}>Media</option>
+                <option value="Baja" ${prioridadFilter === 'Baja' ? 'selected' : ''}>Baja</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearFilters('casos')">🔄 Limpiar Filtros y Búsqueda</button>
+        </div>`;
+
+        html += renderTable('casos', cols, data, i => {
             const req = appData.requisitos.find(r => r.id === i.requisito);
             const captura = appData.capturas.find(c => c.vinculo === i.id && c.archivos);
             const hasCapture = captura ? 'has-capture-indicator' : '';
-            
             return `<td class="${hasCapture}"><code>${i.id}</code></td>
                     <td>${req ? `<span class="badge badge-purple" title="${req.titulo}">${i.requisito}</span>` : '<span style="color:var(--text2);">-</span>'}</td>
                     <td><b>${i.titulo || ''}</b></td>
@@ -2102,6 +3609,8 @@ ${renderDonutChart('Severidad Bugs', [
                     <td>${i.actor || '-'}</td>
                     <td><span class="badge ${i.estado === 'Pasado' ? 'badge-success' : i.estado === 'Fallido' ? 'badge-danger' : 'badge-neutral'}">${i.estado || 'Pendiente'}</span></td>`;
         }, true, 'caso');
+        
+        return html;
     }
     function renderDiario() {
         // Ahora filtramos por el proyecto activo
@@ -2114,44 +3623,117 @@ ${renderDonutChart('Severidad Bugs', [
     }
     function renderCapturas() {
         const data = filterByProject(appData.capturas);
-        const cols = [{ label: 'ID' }, { label: 'Descripción' }, { label: 'Vinculo' }, { label: 'Evidencia Visual' }];
-        return '<h1 class="page-title">📸 Capturas QA</h1>' + renderTable('capturas', cols, data, i => {
-            // Si hay una imagen guardada, la renderizamos. Si le hacen clic, se abre en grande.
-            const imgHtml = i.archivos && i.archivos.startsWith('data:image')
-                ? `<img src="${i.archivos}" style="height: 50px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);" onclick="window.open('${i.archivos}')">`
-                : '<span style="color:var(--text2); font-size:0.8rem;">Sin imagen</span>';
-            return `<td>${i.id}</td><td><b>${i.descripcion || '-'}</b></td><td><span class="badge badge-info">${i.vinculo || '-'}</span></td><td>${imgHtml}</td>`;
-        });
-    }
-
-    function renderApis() {
-        const data = filterByProject(appData.apis);
         const cols = [
-            { label: 'ID' }, 
-            { label: 'Requisito' },
-            { label: 'Nombre' }, 
-            { label: 'Endpoint' }, 
-            { label: 'Método' }, 
-            { label: 'Status' }, 
-            { label: 'Latencia' }, 
-            { label: 'Estado' }
+            { label: 'ID', field: 'id' }, 
+            { label: 'Descripción', field: 'descripcion' }, 
+            { label: 'Vínculo', field: 'vinculo' }, 
+            { label: 'Evidencia Visual', field: 'archivos' }
         ];
         
-        return '<h1 class="page-title">🔌 APIs (Evidencias Postman)</h1>' +
-        renderTable('apis', cols, data, i => {
-            const req = appData.requisitos.find(r => r.id === i.requisito);
-            const statusBadge = i.statusCode ? `<span class="badge ${i.statusCode < 400 ? 'badge-success' : 'badge-danger'}">${i.statusCode}</span>` : '<span style="color:var(--text2);">-</span>';
-            const latency = i.tiempoRespuesta ? `<span style="font-weight:600; color:${i.tiempoRespuesta < 500 ? 'var(--success)' : 'var(--warning)'};">${i.tiempoRespuesta} ms</span>` : '-';
+        return '<h1 class="page-title">📸 Capturas QA</h1>' + 
+        renderTable('capturas', cols, data, i => {
+            // Determinar tipo de vínculo
+            let vinculoHtml = '<span style="color:var(--text2);">Sin vincular</span>';
+            if (i.vinculo) {
+                if (i.vinculo.startsWith('caso_')) {
+                    const casoId = i.vinculo.replace('caso_', '');
+                    const caso = appData.casos.find(c => c.id === casoId);
+                    vinculoHtml = `<span class="badge badge-info">📋 ${casoId}</span>`;
+                } else if (i.vinculo.startsWith('bug_')) {
+                    const bugId = i.vinculo.replace('bug_', '');
+                    const bug = appData.bugs.find(b => b.id === bugId);
+                    vinculoHtml = `<span class="badge badge-danger">🐛 ${bugId}</span>`;
+                } else if (i.vinculo.startsWith('api_')) {
+                    const apiId = i.vinculo.replace('api_', '');
+                    const api = appData.apis.find(a => a.id === apiId);
+                    vinculoHtml = `<span class="badge badge-purple">🔌 ${apiId}</span>`;
+                }
+            }
             
+            // Renderizar imagen si existe
+            const imgHtml = i.archivos && i.archivos.startsWith('data:image')
+                ? `<img src="${i.archivos}" style="height: 50px; border-radius: 6px; cursor: pointer; border: 1px solid var(--border);" onclick="window.open('${i.archivos}', '_blank')" title="Click para ver en grande">`
+                : '<span style="color:var(--text2); font-size:0.8rem;">Sin imagen</span>';
+                
             return `<td><code>${i.id}</code></td>
+                    <td><b>${i.descripcion || '-'}</b></td>
+                    <td>${vinculoHtml}</td>
+                    <td>${imgHtml}</td>`;
+        }, true, 'captura');
+    }
+    function renderApis() {
+        let data = filterByProject(appData.apis);
+        
+        // --- FILTROS ---
+        const metodoFilter = document.getElementById('filter_api_metodo')?.value || '';
+        const estadoFilter = document.getElementById('filter_api_estado')?.value || '';
+        
+        if (metodoFilter) data = data.filter(i => i.metodo === metodoFilter);
+        if (estadoFilter) data = data.filter(i => i.estado === estadoFilter);
+        // ----------------------
+        
+        const cols = [
+            { label: 'ID', field: 'id' }, 
+            { label: 'Requisito', field: 'requisito' },
+            { label: 'Nombre', field: 'nombre' }, 
+            { label: 'Endpoint', field: 'endpoint' }, 
+            { label: 'Método', field: 'metodo' }, 
+            { label: 'Status', field: 'statusCode' }, 
+            { label: 'Latencia', field: 'tiempoRespuesta' }, 
+            { label: 'Fecha Ejec.', field: 'fechaEjecucion' }, 
+            { label: 'Estado', field: 'estado' }
+        ];
+        
+        let html = '<h1 class="page-title">🔌 APIs (Evidencias Postman)</h1>';
+        
+        // Controles de Filtro
+        html += `<div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+            <select id="filter_api_metodo" onchange="renderPage('apis')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todos los Métodos</option>
+                <option value="GET" ${metodoFilter === 'GET' ? 'selected' : ''}>GET</option>
+                <option value="POST" ${metodoFilter === 'POST' ? 'selected' : ''}>POST</option>
+                <option value="PUT" ${metodoFilter === 'PUT' ? 'selected' : ''}>PUT</option>
+                <option value="DELETE" ${metodoFilter === 'DELETE' ? 'selected' : ''}>DELETE</option>
+            </select>
+            <select id="filter_api_estado" onchange="renderPage('apis')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todos los Estados</option>
+                <option value="Correcta" ${estadoFilter === 'Correcta' ? 'selected' : ''}>Correcta</option>
+                <option value="Error" ${estadoFilter === 'Error' ? 'selected' : ''}>Error</option>
+                <option value="Pendiente" ${estadoFilter === 'Pendiente' ? 'selected' : ''}>Pendiente</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearFilters('apis')">🔄 Limpiar Filtros</button>
+        </div>`;
+        
+        html += renderTable('apis', cols, data, i => {
+            const req = appData.requisitos.find(r => r.id === i.requisito);
+            const captura = appData.capturas.find(c => c.vinculo === 'api_' + i.id && c.archivos);
+            const hasCapture = captura ? 'has-capture-indicator' : '';
+            
+            const statusBadge = i.statusCode 
+                ? `<span class="badge ${i.statusCode < 400 ? 'badge-success' : 'badge-danger'}">${i.statusCode}</span>` 
+                : '<span style="color:var(--text2);">-</span>';
+            
+            const latency = i.tiempoRespuesta 
+                ? `<span style="font-weight:600; color:${i.tiempoRespuesta < 500 ? 'var(--success)' : 'var(--warning)'};">${i.tiempoRespuesta} ms</span>` 
+                : '-';
+            
+            // Formateo de fecha a formato legible
+            const fechaExec = i.fechaEjecucion 
+                ? new Date(i.fechaEjecucion).toLocaleString('es-ES', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'}) 
+                : '<span style="color:var(--text2);">-</span>';
+            
+            return `<td class="${hasCapture}"><code>${i.id}</code></td>
                     <td>${req ? `<span class="badge badge-purple" title="${req.titulo}">${i.requisito}</span>` : '<span style="color:var(--text2);">-</span>'}</td>
                     <td><b>${i.nombre || '-'}</b></td>
                     <td style="font-family:monospace; font-size:0.8rem; max-width:200px; overflow:hidden; text-overflow:ellipsis;">${i.endpoint || '-'}</td>
                     <td><span class="badge badge-info">${i.metodo || 'GET'}</span></td>
                     <td>${statusBadge}</td>
                     <td>${latency}</td>
+                    <td style="font-size:0.8rem; white-space:nowrap;">${fechaExec}</td>
                     <td><span class="badge ${i.estado === 'Correcta' ? 'badge-success' : i.estado === 'Error' ? 'badge-danger' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`;
-        });
+        }, true, 'api');
+        
+        return html;
     }
 
     function renderTrazabilidad() {
@@ -2174,19 +3756,48 @@ ${renderDonutChart('Severidad Bugs', [
         }
     };
     function renderBugs() {
-        const data = filterByProject(appData.bugs).filter(b => b.estado !== 'Solucionado');
+        let data = filterByProject(appData.bugs).filter(b => b.estado !== 'Solucionado');
+        
+        // --- NUEVO: Filtros ---
+        const severidadFilter = document.getElementById('filter_bug_sev')?.value || '';
+        const estadoBugFilter = document.getElementById('filter_bug_estado')?.value || '';
+        
+        if (severidadFilter) data = data.filter(i => i.severidad === severidadFilter);
+        if (estadoBugFilter) data = data.filter(i => i.estado === estadoBugFilter);
+        // ----------------------
+
         const cols = [{ label: 'ID', field: 'id' }, { label: 'Título', field: 'titulo' }, { label: 'Severidad', field: 'severidad' }, { label: 'Caso', field: 'casoRelacionado' }, { label: 'Estado', field: 'estado' }];
         
-        return '<h1 class="page-title">🐛 Bugs Activos</h1>' + renderTable('bugs', cols, data, i => {
+        let html = '<h1 class="page-title">🐛 Bugs Activos</h1>';
+        
+        // Controles de Filtro
+        html += `<div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+            <select id="filter_bug_sev" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todas las Severidades</option>
+                <option value="Bloqueante" ${severidadFilter === 'Bloqueante' ? 'selected' : ''}>Bloqueante</option>
+                <option value="Crítica" ${severidadFilter === 'Crítica' ? 'selected' : ''}>Crítica</option>
+                <option value="Mayor" ${severidadFilter === 'Mayor' ? 'selected' : ''}>Mayor</option>
+                <option value="Menor" ${severidadFilter === 'Menor' ? 'selected' : ''}>Menor</option>
+            </select>
+            <select id="filter_bug_estado" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todos los Estados</option>
+                <option value="Abierto" ${estadoBugFilter === 'Abierto' ? 'selected' : ''}>Abierto</option>
+                <option value="En revisión" ${estadoBugFilter === 'En revisión' ? 'selected' : ''}>En revisión</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearFilters('bugs')">🔄 Limpiar Filtros y Búsqueda</button>
+        </div>`;
+
+        html += renderTable('bugs', cols, data, i => {
             const captura = appData.capturas.find(c => c.vinculo === i.id && c.archivos);
             const hasCapture = captura ? 'has-capture-indicator' : '';
-            
             return `<td class="${hasCapture}"><code>${i.id}</code></td>
                     <td><b>${i.titulo}</b></td>
                     <td><span class="badge ${i.severidad === 'Bloqueante' ? 'badge-danger' : i.severidad === 'Crítica' ? 'badge-warning' : 'badge-info'}">${i.severidad}</span></td>
                     <td><code>${i.casoRelacionado || '-'}</code></td>
                     <td><span class="badge ${i.estado === 'Abierto' ? 'badge-danger' : 'badge-warning'}">${i.estado}</span></td>`;
         }, true, 'bug');
+        
+        return html;
     }
     function renderHistorico() {
         const data = filterByProject(appData.bugs).filter(b => b.estado === 'Solucionado');
@@ -2196,10 +3807,43 @@ ${renderDonutChart('Severidad Bugs', [
         );
     }
     function renderEjecuciones() {
-        const data = filterByProject(appData.ejecuciones);
+        let data = filterByProject(appData.ejecuciones);
+        
+        // --- NUEVO: Filtro ---
+        const tieneFallos = document.getElementById('filter_exec_fallos')?.value || '';
+        
+        if (tieneFallos === 'si') {
+            data = data.filter(tp => {
+                try {
+                    const casos = JSON.parse(tp.casosAsociados || '[]');
+                    return casos.some(c => c.status === 'Failed' || c.status === 'Blocked');
+                } catch (e) { return false; }
+            });
+        } else if (tieneFallos === 'no') {
+            data = data.filter(tp => {
+                try {
+                    const casos = JSON.parse(tp.casosAsociados || '[]');
+                    return !casos.some(c => c.status === 'Failed' || c.status === 'Blocked');
+                } catch (e) { return true; }
+            });
+        }
+        // ----------------------
+
         let html = `<h1 class="page-title">▶️ Test Execution (Xray View)</h1>
             <p class="page-subtitle">Gestiona ciclos de prueba con matriz de ejecución estilo Xray</p>
+            
+            <!-- NUEVO: Filtro -->
+            <div style="margin-bottom:20px;">
+                <select id="filter_exec_fallos" onchange="renderPage('ejecuciones')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                    <option value="">Mostrar todos los Test Plans</option>
+                    <option value="si" ${tieneFallos === 'si' ? 'selected' : ''}>⚠️ Solo con Fallos/Bloqueos</option>
+                    <option value="no" ${tieneFallos === 'no' ? 'selected' : ''}>✅ Solo sin Fallos</option>
+                </select>
+            </div>
+
             <button class="btn btn-accent" data-action="create" style="margin-bottom:20px;">➕ Nuevo Test Plan</button>`;
+        
+        // ... resto del código de renderEjecuciones igual ...
         if (data.length === 0) {
             html += `<div class="empty-state">
             <div class="empty-state-icon">📭</div>
@@ -2210,6 +3854,7 @@ ${renderDonutChart('Severidad Bugs', [
         }
         html += '<div class="xray-container">';
         data.forEach(tp => {
+            // ... (el resto del bucle forEach se mantiene igual) ...
             let casos = [];
             try { casos = JSON.parse(tp.casosAsociados || '[]'); } catch (e) { }
             const stats = {
@@ -2312,10 +3957,10 @@ ${renderDonutChart('Severidad Bugs', [
     }
 
     // ============ FIRMA DIGITAL Y CERTIFICADO PDF ============
-    window.abrirModalFirma = function(execId) {
+    window.abrirModalFirma = function (execId) {
         const exec = appData.ejecuciones.find(e => e.id === execId);
         if (!exec) return;
-        
+
         const container = document.getElementById('modalContainer');
         const html = `
             <div class="modal-overlay">
@@ -2350,12 +3995,12 @@ ${renderDonutChart('Severidad Bugs', [
         container.innerHTML = html;
     };
 
-    window.confirmarFirma = function(execId) {
+    window.confirmarFirma = function (execId) {
         const pass = document.getElementById('firma_pass').value;
         if (pass !== currentUser.password) {
             return toast('Contraseña incorrecta. La firma digital requiere autenticación.', 'error');
         }
-        
+
         const nombre = document.getElementById('firma_nombre').value;
         const comentario = document.getElementById('firma_comentario').value;
 
@@ -2366,23 +4011,23 @@ ${renderDonutChart('Severidad Bugs', [
             exec.aprobadoPor = nombre;
             exec.fechaAprobacion = new Date().toISOString();
             exec.comentarioAprobacion = comentario;
-            
+
             saveData();
             closeModal();
             renderPage(currentPage);
             toast('Ciclo firmado correctamente. Generando certificado...', 'success');
-            
+
             // Generamos el PDF inmediatamente
             generarCertificadoPDF(execId);
         }
     };
 
-    window.generarCertificadoPDF = function(execId) {
+    window.generarCertificadoPDF = function (execId) {
         const exec = appData.ejecuciones.find(e => e.id === execId);
         if (!exec) return toast('Ejecución no encontrada', 'error');
-        
+
         const proyecto = appData.proyectos.find(p => p.id === exec.proyecto) || { nombre: 'General', codigoCliente: 'N/A' };
-        
+
         // ✅ CORRECCIÓN: Parseo seguro para evitar que la función colapse
         let casos = [];
         try {
@@ -2396,7 +4041,7 @@ ${renderDonutChart('Severidad Bugs', [
         const pasados = casos.filter(c => c.status === 'Passed').length;
         const fallidos = casos.filter(c => c.status === 'Failed').length;
         const cobertura = totalCasos > 0 ? Math.round((pasados / totalCasos) * 100) : 0;
-        const hashCert = btoa(exec.id + (exec.fechaAprobacion || Date.now())).substring(0, 16); 
+        const hashCert = btoa(exec.id + (exec.fechaAprobacion || Date.now())).substring(0, 16);
 
         const htmlContent = `
         <!DOCTYPE html>
@@ -2520,7 +4165,7 @@ ${renderDonutChart('Severidad Bugs', [
 
         // ✅ NUEVA ESTRATEGIA: Usar nueva pestaña (100% compatible, evita bloqueos de iframes)
         const printWindow = window.open('', '_blank');
-        
+
         if (!printWindow) {
             return toast('⚠️ El navegador bloqueó la ventana emergente. Por favor, permítela para generar el PDF.', 'warning');
         }
@@ -2810,7 +4455,7 @@ ${renderDonutChart('Severidad Bugs', [
         const casos = filterByProject(appData.casos);
         const bugs = filterByProject(appData.bugs);
         const apis = filterByProject(appData.apis);
-        
+
         let html = `<h1 class="page-title"> Informes y Exportación</h1>
         <p class="page-subtitle">Genera informes profesionales y exporta datos en diferentes formatos</p>
         
@@ -2888,7 +4533,7 @@ ${renderDonutChart('Severidad Bugs', [
                 </ul>
             </div>
         </div>`;
-        
+
         return html;
     }
 
@@ -2920,7 +4565,7 @@ ${renderDonutChart('Severidad Bugs', [
         </div>`;
     }
     // ============ INFORME DOCX PROFESIONAL ============
-    window.downloadDocx = function() {
+    window.downloadDocx = function () {
         const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
         const casos = filterByProject(appData.casos);
         const bugs = filterByProject(appData.bugs);
@@ -3105,12 +4750,12 @@ ${renderDonutChart('Severidad Bugs', [
         reader.onload = e => {
             try {
                 const data = JSON.parse(e.target.result);
-                
+
                 // Validar que sea un archivo válido
                 if (!data.usuarios && !data.casos && !data.proyectos) {
                     return toast('Archivo JSON inválido: no contiene datos de QA Suite', 'error');
                 }
-                
+
                 if (confirm('¿Sobrescribir datos actuales en FIREBASE?\n\nEsta acción no se puede deshacer.')) {
                     // Fusionar datos importados con la estructura actual
                     appData = {
@@ -3129,9 +4774,9 @@ ${renderDonutChart('Severidad Bugs', [
                         notificaciones: data.notificaciones || [],
                         configuracion: data.configuracion || appData.configuracion || { theme: 'dark', activeProject: '' }
                     };
-                    
+
                     notifications = appData.notificaciones || [];
-                    
+
                     // Guardar en Firebase
                     saveData().then(() => {
                         populateProjectSelector();
@@ -3211,7 +4856,7 @@ ${renderDonutChart('Severidad Bugs', [
 
         appData.comentarios.push(newComment);
         saveData();
-        
+
         // Opcional: Registrar en trazabilidad
         // registrarTrazabilidad(`Comentó en ${entityType} #${entityId}`);
 
@@ -3223,11 +4868,11 @@ ${renderDonutChart('Severidad Bugs', [
     window.renderCommentsSection = (entityType, entityId) => {
         const container = document.getElementById(`commentsContainer_${entityType}_${entityId}`);
         if (!container) return;
-        
+
         const comentarios = appData.comentarios.filter(c => c.entityType === entityType && c.entityId == entityId);
         let html = `<div class="comments-list" style="margin-top: 15px; max-height: 250px; overflow-y: auto; padding-right: 5px;">`;
-        
-        if(comentarios.length === 0) {
+
+        if (comentarios.length === 0) {
             html += `<p style="color: var(--text2); font-size: 0.9rem; text-align: center; padding: 15px 0;">No hay comentarios aún.</p>`;
         } else {
             comentarios.forEach(c => {
@@ -3257,7 +4902,7 @@ ${renderDonutChart('Severidad Bugs', [
             });
         }
         html += `</div>`;
-        
+
         html += `
         <div class="comment-input-area" style="display: flex; gap: 10px; margin-top: 15px; border-top: 1px solid var(--border); padding-top: 15px;">
             <input type="text" id="commentInput_${entityType}_${entityId}" placeholder="Escribe un comentario..." class="form-control" style="flex: 1; padding: 10px 15px; border-radius: 8px; border: 1px solid var(--border); background: var(--input-bg); color: var(--text);" onkeypress="if(event.key==='Enter') addComment('${entityType}', '${entityId}')">
@@ -3275,10 +4920,10 @@ ${renderDonutChart('Severidad Bugs', [
         });
     };
 
-    window.openCommandPalette = function() {
+    window.openCommandPalette = function () {
         const palette = document.getElementById('commandPalette');
         const input = document.getElementById('commandPaletteInput');
-        
+
         if (palette) {
             palette.style.display = 'flex';
             input.value = '';
@@ -3289,8 +4934,8 @@ ${renderDonutChart('Severidad Bugs', [
             renderCommandPaletteResults([]);
         }
     };
-    
-    window.closeCommandPalette = function() {
+
+    window.closeCommandPalette = function () {
         const palette = document.getElementById('commandPalette');
         if (palette) {
             palette.style.display = 'none';
@@ -3298,8 +4943,8 @@ ${renderDonutChart('Severidad Bugs', [
             commandPaletteResults = [];
         }
     };
-    
-    window.toggleCommandPalette = function() {
+
+    window.toggleCommandPalette = function () {
         if (commandPaletteOpen) {
             closeCommandPalette();
         } else {
@@ -3309,15 +4954,15 @@ ${renderDonutChart('Severidad Bugs', [
 
     function searchGlobal(query) {
         if (!query || query.length < 2) return [];
-        
+
         const results = [];
         const q = query.toLowerCase();
         const ap = getActiveProject();
-        
+
         // Buscar en Casos
         appData.casos.forEach(caso => {
             if (!ap || caso.proyecto === ap) {
-                if (caso.id.toLowerCase().includes(q) || 
+                if (caso.id.toLowerCase().includes(q) ||
                     (caso.titulo && caso.titulo.toLowerCase().includes(q)) ||
                     (caso.actor && caso.actor.toLowerCase().includes(q))) {
                     results.push({
@@ -3326,19 +4971,19 @@ ${renderDonutChart('Severidad Bugs', [
                         title: caso.titulo || caso.id,
                         subtitle: `${caso.id} ${caso.actor ? '· ' + caso.actor : ''}`,
                         badge: caso.prioridad || 'Media',
-                        badgeClass: caso.prioridad === 'Crítica' ? 'badge-danger' : 
-                                    caso.prioridad === 'Alta' ? 'badge-warning' : 'badge-info',
+                        badgeClass: caso.prioridad === 'Crítica' ? 'badge-danger' :
+                            caso.prioridad === 'Alta' ? 'badge-warning' : 'badge-info',
                         id: caso.id,
                         page: 'casos'
                     });
                 }
             }
         });
-        
+
         // Buscar en Bugs
         appData.bugs.forEach(bug => {
             if (!ap || bug.proyecto === ap) {
-                if (bug.id.toLowerCase().includes(q) || 
+                if (bug.id.toLowerCase().includes(q) ||
                     (bug.titulo && bug.titulo.toLowerCase().includes(q)) ||
                     (bug.casoRelacionado && bug.casoRelacionado.toLowerCase().includes(q))) {
                     results.push({
@@ -3354,15 +4999,15 @@ ${renderDonutChart('Severidad Bugs', [
                 }
             }
         });
-        
+
         // Buscar en Ejecuciones
         appData.ejecuciones.forEach(exec => {
             if (!ap || exec.proyecto === ap) {
-                if (exec.id.toLowerCase().includes(q) || 
+                if (exec.id.toLowerCase().includes(q) ||
                     (exec.nombreCiclo && exec.nombreCiclo.toLowerCase().includes(q))) {
                     let casosCount = 0;
-                    try { casosCount = JSON.parse(exec.casosAsociados || '[]').length; } catch(e) {}
-                    
+                    try { casosCount = JSON.parse(exec.casosAsociados || '[]').length; } catch (e) { }
+
                     results.push({
                         type: 'ejecuciones',
                         icon: '▶️',
@@ -3376,11 +5021,11 @@ ${renderDonutChart('Severidad Bugs', [
                 }
             }
         });
-        
+
         // Buscar en APIs
         appData.apis.forEach(api => {
             if (!ap || api.proyecto === ap) {
-                if (api.id.toLowerCase().includes(q) || 
+                if (api.id.toLowerCase().includes(q) ||
                     (api.nombre && api.nombre.toLowerCase().includes(q)) ||
                     (api.endpoint && api.endpoint.toLowerCase().includes(q))) {
                     results.push({
@@ -3389,18 +5034,18 @@ ${renderDonutChart('Severidad Bugs', [
                         title: api.nombre || api.id,
                         subtitle: `${api.id} · ${api.metodo || 'GET'} ${api.endpoint || ''}`,
                         badge: api.estado || 'Pendiente',
-                        badgeClass: api.estado === 'Correcta' ? 'badge-success' : 
-                                    api.estado === 'Error' ? 'badge-danger' : 'badge-warning',
+                        badgeClass: api.estado === 'Correcta' ? 'badge-success' :
+                            api.estado === 'Error' ? 'badge-danger' : 'badge-warning',
                         id: api.id,
                         page: 'apis'
                     });
                 }
             }
         });
-        
+
         // Buscar en Proyectos
         appData.proyectos.forEach(proj => {
-            if (proj.id.toLowerCase().includes(q) || 
+            if (proj.id.toLowerCase().includes(q) ||
                 (proj.nombre && proj.nombre.toLowerCase().includes(q)) ||
                 (proj.codigoCliente && proj.codigoCliente.toLowerCase().includes(q))) {
                 results.push({
@@ -3409,18 +5054,18 @@ ${renderDonutChart('Severidad Bugs', [
                     title: proj.nombre || proj.id,
                     subtitle: `${proj.id} ${proj.codigoCliente ? '· ' + proj.codigoCliente : ''}`,
                     badge: proj.estado || 'Planificado',
-                    badgeClass: proj.estado === 'Activo' ? 'badge-success' : 
-                                proj.estado === 'Completado' ? 'badge-info' : 'badge-warning',
+                    badgeClass: proj.estado === 'Activo' ? 'badge-success' :
+                        proj.estado === 'Completado' ? 'badge-info' : 'badge-warning',
                     id: proj.id,
                     page: 'proyectos'
                 });
             }
         });
-        
+
         // Buscar en Objetivos
         appData.objetivos.forEach(obj => {
             if (!ap || obj.proyecto === ap) {
-                if (obj.id.toLowerCase().includes(q) || 
+                if (obj.id.toLowerCase().includes(q) ||
                     (obj.objetivo && obj.objetivo.toLowerCase().includes(q))) {
                     results.push({
                         type: 'objetivos',
@@ -3428,22 +5073,22 @@ ${renderDonutChart('Severidad Bugs', [
                         title: obj.objetivo || obj.id,
                         subtitle: `${obj.id} · ${obj.responsable || 'Sin responsable'}`,
                         badge: obj.estado || 'Pendiente',
-                        badgeClass: obj.estado === 'Finalizado' ? 'badge-success' : 
-                                    obj.estado === 'En progreso' ? 'badge-info' : 'badge-warning',
+                        badgeClass: obj.estado === 'Finalizado' ? 'badge-success' :
+                            obj.estado === 'En progreso' ? 'badge-info' : 'badge-warning',
                         id: obj.id,
                         page: 'objetivos'
                     });
                 }
             }
         });
-        
+
         return results.slice(0, 50); // Limitar a 50 resultados
     }
-    
+
     function renderCommandPaletteResults(results) {
         const container = document.getElementById('commandPaletteResults');
         if (!container) return;
-        
+
         if (results.length === 0) {
             container.innerHTML = `
                 <div class="command-palette-empty">
@@ -3453,14 +5098,14 @@ ${renderDonutChart('Severidad Bugs', [
             `;
             return;
         }
-        
+
         // Agrupar por tipo
         const grouped = {};
         results.forEach(r => {
             if (!grouped[r.type]) grouped[r.type] = [];
             grouped[r.type].push(r);
         });
-        
+
         let html = '';
         const typeLabels = {
             'casos': { icon: '📋', label: 'Casos de Uso' },
@@ -3470,7 +5115,7 @@ ${renderDonutChart('Severidad Bugs', [
             'proyectos': { icon: '📁', label: 'Proyectos' },
             'objetivos': { icon: '🎯', label: 'Objetivos' }
         };
-        
+
         let globalIndex = 0;
         Object.keys(grouped).forEach(type => {
             const label = typeLabels[type] || { icon: '📄', label: type };
@@ -3480,7 +5125,7 @@ ${renderDonutChart('Severidad Bugs', [
                     <span>${label.label}</span>
                     <span style="margin-left: auto; opacity: 0.6;">${grouped[type].length}</span>
                 </div>`;
-            
+
             grouped[type].forEach(item => {
                 const isSelected = globalIndex === commandPaletteSelectedIndex;
                 html += `
@@ -3498,12 +5143,12 @@ ${renderDonutChart('Severidad Bugs', [
                 `;
                 globalIndex++;
             });
-            
+
             html += '</div>';
         });
-        
+
         container.innerHTML = html;
-        
+
         // Agregar event listeners
         container.querySelectorAll('.command-palette-item').forEach(item => {
             item.addEventListener('click', () => {
@@ -3511,19 +5156,19 @@ ${renderDonutChart('Severidad Bugs', [
             });
         });
     }
-    
+
     function highlightText(text, query) {
         if (!query || query.length < 2) return text;
         const regex = new RegExp(`(${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi');
         return text.replace(regex, '<mark style="background: rgba(59, 130, 246, 0.3); color: inherit; padding: 0 2px; border-radius: 2px;">$1</mark>');
     }
-    
+
     function selectCommandPaletteItem(item) {
         const id = item.dataset.id;
         const page = item.dataset.page;
-        
+
         closeCommandPalette();
-        
+
         // Navegar a la página y abrir el elemento
         if (page && id) {
             navigateTo(page);
@@ -3532,26 +5177,26 @@ ${renderDonutChart('Severidad Bugs', [
             }, 300);
         }
     }
-    
+
     function navigateCommandPalette(direction) {
         const items = document.querySelectorAll('.command-palette-item');
         if (items.length === 0) return;
-        
+
         items.forEach(item => item.classList.remove('selected'));
-        
+
         if (direction === 'up') {
             commandPaletteSelectedIndex = (commandPaletteSelectedIndex - 1 + items.length) % items.length;
         } else {
             commandPaletteSelectedIndex = (commandPaletteSelectedIndex + 1) % items.length;
         }
-        
+
         const selectedItem = items[commandPaletteSelectedIndex];
         if (selectedItem) {
             selectedItem.classList.add('selected');
             selectedItem.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
     }
-    
+
     // Event listeners para Command Palette
     document.addEventListener('keydown', (e) => {
         // Ctrl+K para abrir/cerrar
@@ -3559,17 +5204,17 @@ ${renderDonutChart('Severidad Bugs', [
             e.preventDefault();
             toggleCommandPalette();
         }
-        
+
         // Si la palette está abierta
         if (commandPaletteOpen) {
             const input = document.getElementById('commandPaletteInput');
-            
+
             // Escape para cerrar
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeCommandPalette();
             }
-            
+
             // Flechas para navegar
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
@@ -3579,7 +5224,7 @@ ${renderDonutChart('Severidad Bugs', [
                 e.preventDefault();
                 navigateCommandPalette('up');
             }
-            
+
             // Enter para seleccionar
             if (e.key === 'Enter' && input) {
                 e.preventDefault();
@@ -3588,7 +5233,7 @@ ${renderDonutChart('Severidad Bugs', [
                     selectCommandPaletteItem(selectedItem);
                 }
             }
-            
+
             // Búsqueda en tiempo real
             if (input && e.key.length === 1 && !e.ctrlKey && !e.altKey && !e.metaKey) {
                 setTimeout(() => {
@@ -3600,7 +5245,7 @@ ${renderDonutChart('Severidad Bugs', [
             }
         }
     });
-    
+
     // Input handler para búsqueda en tiempo real
     document.addEventListener('input', (e) => {
         if (commandPaletteOpen && e.target.id === 'commandPaletteInput') {
@@ -3615,7 +5260,7 @@ ${renderDonutChart('Severidad Bugs', [
     console.log('Versión:', XLSX ? XLSX.version : 'No disponible');
 
     // ============ EXPORTAR CASOS A EXCEL ============
-    window.exportCasosToExcel = function() {
+    window.exportCasosToExcel = function () {
         // Verificar si XLSX está disponible
         if (typeof XLSX === 'undefined') {
             return toast('❌ Error: Librería Excel no cargada. Recarga la página.', 'error');
@@ -3672,15 +5317,15 @@ ${renderDonutChart('Severidad Bugs', [
     };
 
     // ============ INFORME DE EJECUCIONES Y BUGS ============
-    window.downloadEjecucionesBugsDoc = function() {
+    window.downloadEjecucionesBugsDoc = function () {
         const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
         const ejecuciones = filterByProject(appData.ejecuciones);
         const bugs = filterByProject(appData.bugs);
         const casos = filterByProject(appData.casos);
-        
+
         const bugsAbiertos = bugs.filter(b => b.estado !== 'Solucionado').length;
         const bugsSolucionados = bugs.filter(b => b.estado === 'Solucionado').length;
-        
+
         let html = `
         <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
         <head><meta charset="UTF-8"><title>Informe Ejecuciones y Bugs</title>
@@ -3753,16 +5398,16 @@ ${renderDonutChart('Severidad Bugs', [
         <table>
             <tr><th>ID</th><th>Ciclo</th><th>Fecha</th><th>Responsable</th><th>Casos</th></tr>
             ${ejecuciones.map(e => {
-                let casosCount = 0;
-                try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
-                return `<tr>
+            let casosCount = 0;
+            try { casosCount = JSON.parse(e.casosAsociados || '[]').length; } catch (err) { }
+            return `<tr>
                     <td>${e.id}</td>
                     <td>${e.nombreCiclo || ''}</td>
                     <td>${e.fecha || '-'}</td>
                     <td>${e.responsable || '-'}</td>
                     <td>${casosCount}</td>
                 </tr>`;
-            }).join('')}
+        }).join('')}
         </table>
         
         <h1 class="section">3. Defectos Detectados</h1>
@@ -3782,10 +5427,10 @@ ${renderDonutChart('Severidad Bugs', [
         <table>
             <tr><th>Severidad</th><th>Cantidad</th><th>Porcentaje</th></tr>
             ${['Bloqueante', 'Crítica', 'Mayor', 'Menor'].map(sev => {
-                const count = bugs.filter(b => b.severidad === sev).length;
-                const pct = bugs.length > 0 ? Math.round((count / bugs.length) * 100) : 0;
-                return `<tr><td>${sev}</td><td>${count}</td><td>${pct}%</td></tr>`;
-            }).join('')}
+            const count = bugs.filter(b => b.severidad === sev).length;
+            const pct = bugs.length > 0 ? Math.round((count / bugs.length) * 100) : 0;
+            return `<tr><td>${sev}</td><td>${count}</td><td>${pct}%</td></tr>`;
+        }).join('')}
         </table>
         
         <div class="footer">
@@ -3793,7 +5438,7 @@ ${renderDonutChart('Severidad Bugs', [
             <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
         </div>
         </body></html>`;
-        
+
         const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -3805,14 +5450,14 @@ ${renderDonutChart('Severidad Bugs', [
     };
 
     // ============ INFORME DE APIs ============
-    window.downloadApisDoc = function() {
+    window.downloadApisDoc = function () {
         const proyecto = getActiveProject() ? appData.proyectos.find(p => p.id === getActiveProject()) : null;
         const apis = filterByProject(appData.apis);
-        
+
         const apisCorrectas = apis.filter(a => a.estado === 'Correcta').length;
         const apisError = apis.filter(a => a.estado === 'Error').length;
         const apisPendientes = apis.filter(a => a.estado === 'Pendiente').length;
-        
+
         let html = `
         <html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
         <head><meta charset="UTF-8"><title>Informe Gestión APIs</title>
@@ -3895,20 +5540,20 @@ ${renderDonutChart('Severidad Bugs', [
         <table>
             <tr><th>Método HTTP</th><th>Cantidad</th><th>Porcentaje</th></tr>
             ${['GET', 'POST', 'PUT', 'DELETE'].map(method => {
-                const count = apis.filter(a => a.metodo === method).length;
-                const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
-                return `<tr><td>${method}</td><td>${count}</td><td>${pct}%</td></tr>`;
-            }).join('')}
+            const count = apis.filter(a => a.metodo === method).length;
+            const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
+            return `<tr><td>${method}</td><td>${count}</td><td>${pct}%</td></tr>`;
+        }).join('')}
         </table>
         
         <h1 class="section">4. Análisis por Estado</h1>
         <table>
             <tr><th>Estado</th><th>Cantidad</th><th>Porcentaje</th></tr>
             ${['Correcta', 'Error', 'Pendiente'].map(status => {
-                const count = apis.filter(a => a.estado === status).length;
-                const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
-                return `<tr><td>${status}</td><td>${count}</td><td>${pct}%</td></tr>`;
-            }).join('')}
+            const count = apis.filter(a => a.estado === status).length;
+            const pct = apis.length > 0 ? Math.round((count / apis.length) * 100) : 0;
+            return `<tr><td>${status}</td><td>${count}</td><td>${pct}%</td></tr>`;
+        }).join('')}
         </table>
         
         <div class="footer">
@@ -3916,7 +5561,7 @@ ${renderDonutChart('Severidad Bugs', [
             <p>Este documento es confidencial y para uso interno del equipo de calidad.</p>
         </div>
         </body></html>`;
-        
+
         const blob = new Blob(['\ufeff' + html], { type: 'application/msword' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
@@ -3928,32 +5573,32 @@ ${renderDonutChart('Severidad Bugs', [
     };
 
     // ============ COMPARATIVA DE EJECUCIONES ============
-    window.compararEjecuciones = function() {
+    window.compararEjecuciones = function () {
         const exec1Id = document.getElementById('compExec1').value;
         const exec2Id = document.getElementById('compExec2').value;
         const resultDiv = document.getElementById('comparativaResult');
-        
+
         if (!exec1Id || !exec2Id) {
             return toast('Selecciona dos ejecuciones para comparar', 'warning');
         }
-        
+
         if (exec1Id === exec2Id) {
             return toast('Selecciona dos ejecuciones diferentes', 'warning');
         }
-        
+
         const exec1 = appData.ejecuciones.find(e => e.id === exec1Id);
         const exec2 = appData.ejecuciones.find(e => e.id === exec2Id);
-        
+
         if (!exec1 || !exec2) {
             return toast('Ejecuciones no encontradas', 'error');
         }
-        
+
         // Parsear casos asociados
         let casos1 = [];
         let casos2 = [];
         try { casos1 = JSON.parse(exec1.casosAsociados || '[]'); } catch (e) { }
         try { casos2 = JSON.parse(exec2.casosAsociados || '[]'); } catch (e) { }
-        
+
         // Calcular estadísticas
         const stats1 = {
             Passed: casos1.filter(c => c.status === 'Passed').length,
@@ -3963,7 +5608,7 @@ ${renderDonutChart('Severidad Bugs', [
             Pendiente: casos1.filter(c => c.status === 'Pendiente' || !c.status).length,
             Total: casos1.length
         };
-        
+
         const stats2 = {
             Passed: casos2.filter(c => c.status === 'Passed').length,
             Failed: casos2.filter(c => c.status === 'Failed').length,
@@ -3972,17 +5617,17 @@ ${renderDonutChart('Severidad Bugs', [
             Pendiente: casos2.filter(c => c.status === 'Pendiente' || !c.status).length,
             Total: casos2.length
         };
-        
+
         const pct1 = stats1.Total > 0 ? Math.round((stats1.Passed / stats1.Total) * 100) : 0;
         const pct2 = stats2.Total > 0 ? Math.round((stats2.Passed / stats2.Total) * 100) : 0;
-        
+
         // Casos únicos en cada ejecución
         const casos1Ids = new Set(casos1.map(c => c.id));
         const casos2Ids = new Set(casos2.map(c => c.id));
         const soloEn1 = [...casos1Ids].filter(id => !casos2Ids.has(id));
         const soloEn2 = [...casos2Ids].filter(id => !casos1Ids.has(id));
         const enAmbas = [...casos1Ids].filter(id => casos2Ids.has(id));
-        
+
         // Comparar estados de casos en ambas ejecuciones
         const cambios = [];
         enAmbas.forEach(casoId => {
@@ -3997,7 +5642,7 @@ ${renderDonutChart('Severidad Bugs', [
                 });
             }
         });
-        
+
         let html = `
         <div style="background:var(--card-alt); padding:20px; border-radius:12px; border:1px solid var(--border);">
             <h3 style="margin-top:0; color:var(--accent);">📊 Comparativa: ${exec1.nombreCiclo} vs ${exec2.nombreCiclo}</h3>
@@ -4029,16 +5674,16 @@ ${renderDonutChart('Severidad Bugs', [
                 </thead>
                 <tbody>
                     ${['Passed', 'Failed', 'In Progress', 'Blocked', 'Pendiente'].map(status => {
-                        const diff = stats2[status] - stats1[status];
-                        const diffColor = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text2)';
-                        return `
+            const diff = stats2[status] - stats1[status];
+            const diffColor = diff > 0 ? 'var(--success)' : diff < 0 ? 'var(--danger)' : 'var(--text2)';
+            return `
                         <tr>
                             <td style="padding:10px; border-bottom:1px solid var(--border);">${status}</td>
                             <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${stats1[status]}</td>
                             <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border);">${stats2[status]}</td>
                             <td style="padding:10px; text-align:center; border-bottom:1px solid var(--border); color:${diffColor}; font-weight:700;">${diff > 0 ? '+' : ''}${diff}</td>
                         </tr>`;
-                    }).join('')}
+        }).join('')}
                 </tbody>
             </table>
             
@@ -4066,7 +5711,7 @@ ${renderDonutChart('Severidad Bugs', [
             ${soloEn1.length > 0 ? `<p style="color:var(--warning); margin-top:15px;">⚠️ ${soloEn1.length} caso(s) solo en ${exec1.nombreCiclo}</p>` : ''}
             ${soloEn2.length > 0 ? `<p style="color:var(--warning); margin-top:15px;">⚠️ ${soloEn2.length} caso(s) solo en ${exec2.nombreCiclo}</p>` : ''}
         </div>`;
-        
+
         resultDiv.innerHTML = html;
         toast('📊 Comparativa generada', 'success');
     };
@@ -4077,10 +5722,10 @@ ${renderDonutChart('Severidad Bugs', [
     async function init() {
         // 1. Cargar datos desde Firebase
         await loadData();
-        
+
         // 2. Suscribirse a cambios en tiempo real (UNA SOLA VEZ)
         suscribirseAlTiempoReal();
-        
+
         // 3. Crear datos base si no existen usuarios
         if (!appData.usuarios || appData.usuarios.length === 0) {
             appData.usuarios = [{ id: 1, nombre: 'Admin Sistema', usuario: 'admin', password: 'password', rol: 'Admin' }];
@@ -4097,21 +5742,21 @@ ${renderDonutChart('Severidad Bugs', [
             appData.comentarios = appData.comentarios || [];
             appData.notificaciones = [];
             appData.configuracion = appData.configuracion || { theme: 'dark', activeProject: '' };
-            
+
             await saveData();
             console.log("✅ Datos base creados");
         }
-        
+
         // 4. Restaurar sesión
         if (!restoreSession()) {
             document.getElementById('authScreen').style.display = 'flex';
             document.getElementById('appScreen').style.display = 'none';
         }
-        
+
         // 5. Event listener para login con Enter
         const loginPassInput = document.getElementById('loginPass');
         if (loginPassInput) loginPassInput.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
-        
+
         // 6. Asegurar que todos los usuarios tengan proyectosAutorizados
         if (appData.usuarios && appData.usuarios.length > 0) {
             let changed = false;
@@ -4123,7 +5768,7 @@ ${renderDonutChart('Severidad Bugs', [
             });
             if (changed) await saveData();
         }
-        
+
         // 7. Asegurar que todos los registros tengan creadoPor
         const dataArrays = ['casos', 'bugs', 'ejecuciones', 'capturas', 'apis', 'registroDiario'];
         let needsSave = false;
