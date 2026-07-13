@@ -2102,3 +2102,135 @@ tr:hover td {
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
+
+/* ============ INDICADOR DE BLOQUEO ============ */
+[data-lock-indicator] {
+    position: relative;
+}
+
+[data-lock-indicator]:hover {
+    background: rgba(245, 158, 11, 0.05);
+}
+
+.lock-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.lock-badge::before {
+    content: '';
+    font-size: 0.75rem;
+}
+
+/* Animación de pulso para locks activos */
+@keyframes lockPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.lock-active {
+    animation: lockPulse 2s ease-in-out infinite;
+}
+
+/* Modal de bloqueo */
+.lock-modal-icon {
+    font-size: 4rem;
+    margin-bottom: 16px;
+    animation: lockBounce 0.5s ease;
+}
+
+@keyframes lockBounce {
+    0% { transform: scale(0); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
+
+/* Estilos para módulo IA */
+.ia-badge {
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    color: #fff;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    font-weight: 600;
+}
+
+.ia-confidence-bar {
+    height: 4px;
+    background: var(--bg);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+.ia-confidence-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--success), var(--accent));
+    border-radius: 2px;
+    transition: width 0.3s ease;
+}
+
+/* Estilos para IA y documentos */
+.ia-case-card {
+    transition: all 0.3s ease;
+}
+
+.ia-case-card:hover {
+    transform: translateX(4px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.case-select {
+    accent-color: var(--accent);
+}
+
+.document-upload-zone {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.document-upload-zone:hover {
+    border-color: var(--accent);
+    background: rgba(139, 92, 246, 0.05);
+}
+
+.document-upload-zone.dragover {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.ia-confidence-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 8px;
+    border-radius: 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+}
+
+.ia-confidence-high {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+.ia-confidence-medium {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--warning);
+}
+
+.ia-confidence-low {
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--info);
+}
