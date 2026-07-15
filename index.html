@@ -5,42 +5,46 @@
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Quality Assurance - Suite de Gestión QA PRO</title>
-        <link rel="stylesheet" href="style.css">
         <link rel="icon" href="https://cdn.iconscout.com/icon/premium/png-512-thumb/pruebas-de-control-de-calidad-icon-svg-download-png-3563382.png?f=webp&w=256" type="image/x-icon">
+        <link rel="stylesheet" href="style.css">
     </head>
 
     <body>
 
-        <!-- ============ AUTH SCREEN ============ -->
-        <div id="authScreen" class="auth-container" style="display:none;">
+        <!-- PANTALLA DE AUTENTICACIÓN -->
+        <div id="authScreen" class="auth-container" style="display: flex;">
             <div class="auth-card">
                 <div class="auth-header">
                     <div class="auth-logo">🛡️</div>
-                    <div class="auth-title">QA Suite PRO</div>
-                    <div class="auth-subtitle">Gestión integral de calidad</div>
+                    <h1 class="auth-title">QA Suite PRO</h1>
+                    <p class="auth-subtitle">Gestión integral de calidad</p>
                 </div>
-
+                
+                <!-- Login -->
                 <div id="loginForm">
                     <div class="form-group">
                         <label>Usuario</label>
-                        <input type="text" id="loginUser" placeholder="usuario">
+                        <input type="text" id="loginUser" placeholder="Tu usuario">
                     </div>
                     <div class="form-group">
                         <label>Contraseña</label>
-                        <input type="password" id="loginPass" placeholder="••••••••">
+                        <input type="password" id="loginPass" placeholder="Tu contraseña">
                     </div>
                     <button class="btn btn-accent" onclick="doLogin()">Iniciar sesión</button>
-                    <div class="auth-toggle">¿Nuevo usuario? <b onclick="showRegister()">Crear cuenta</b></div>
+                    <div class="auth-toggle">
+                        ¿Nuevo usuario? <b onclick="showRegister()">Crear cuenta</b>
+                    </div>
                 </div>
 
-                <div id="registerForm" style="display:none;">
+                <!-- Register -->
+                <div id="registerForm" style="display: none;">
                     <div class="form-group">
                         <label>Nombre completo</label>
-                        <input type="text" id="regName" placeholder="Juan Pérez">
+                        <input type="text" id="regName" placeholder="Tu nombre">
                     </div>
                     <div class="form-group">
                         <label>Usuario</label>
-                        <input type="text" id="regUser" placeholder="juan.perez">
+                        <input type="text" id="regUser" placeholder="Elige un usuario">
                     </div>
                     <div class="form-group">
                         <label>Contraseña</label>
@@ -48,74 +52,59 @@
                     </div>
                     <div class="form-group">
                         <label>Confirmar contraseña</label>
-                        <input type="password" id="regPass2">
+                        <input type="password" id="regPass2" placeholder="Repite la contraseña">
                     </div>
-                    <div class="form-group">
-                        <label>Rol asignado</label>
-                        <input type="text" value="Consultor (Pendiente de revisión)" disabled style="background: var(--input-bg); color: var(--text2); cursor: not-allowed; opacity: 0.8;">
-                        <small style="color: var(--text2); font-size: 0.75rem; margin-top: 6px; display: block; line-height: 1.4;">
-                            ℹ️ Tu cuenta se creará con rol de Consultor. Un administrador deberá confirmar tu rol y asignar tus proyectos desde la app.
-                        </small>
+                    <div style="background: rgba(59, 130, 246, 0.1); padding: 12px; border-radius: 8px; font-size: 0.8rem; color: var(--text2); margin-bottom: 15px;">
+                        ℹ️ Tu cuenta se creará con rol de <b>Consultor</b>. Un administrador deberá confirmar tu rol y asignar tus proyectos.
                     </div>
                     <button class="btn btn-accent" onclick="doRegister()">Registrarse</button>
-                    <div class="auth-toggle">¿Ya tienes cuenta? <b onclick="showLogin()">Iniciar sesión</b></div>
+                    <div class="auth-toggle">
+                        ¿Ya tienes cuenta? <b onclick="showLogin()">Iniciar sesión</b>
+                    </div>
                 </div>
             </div>
         </div>
 
-        <!-- ============ APP SCREEN ============ -->
-        <div id="appScreen" style="display:none;">
-
+        <!-- PANTALLA PRINCIPAL DE LA APP -->
+        <div id="appScreen" style="display: none;">
             <!-- Sidebar -->
-            <aside id="sidebar" class="sidebar">
-                <!-- Generado dinámicamente -->
-            </aside>
+            <aside id="sidebar" class="sidebar"></aside>
 
-            <!-- Main wrapper -->
+            <!-- Main Wrapper -->
             <div class="main-wrapper">
-
                 <!-- Header -->
                 <header class="header">
-                <div class="header-left">
-                    <button class="burger" onclick="toggleSidebar()">☰</button>
-                    <div class="project-selector">
-                        <span>📌</span>
-                        <select id="activeProjectSelect" onchange="onProjectChange()">
-                            <option value="">-- Selecciona un Proyecto --</option>
-                        </select>
+                    <div class="header-left">
+                        <button class="burger" onclick="toggleSidebar()">☰</button>
+                        <div class="project-selector">
+                            <span>📌</span>
+                            <select id="activeProjectSelect" onchange="onProjectChange()">
+                                <option value="">-- Selecciona un Proyecto --</option>
+                            </select>
+                        </div>
+                        <div id="pageTitleDisplay">
+                            <span id="pageTitleIcon">📊</span>
+                            <span id="pageTitleText">Dashboard</span>
+                        </div>
                     </div>
-                    <!-- NUEVO: Título de la página actual -->
-                    <div id="pageTitleDisplay" style="margin-left: 20px; font-weight: 600; font-size: 1.1rem; color: var(--text); display: flex; align-items: center; gap: 8px;">
-                        <span id="pageTitleIcon">📊</span>
-                        <span id="pageTitleText">Dashboard</span>
-                    </div>
-                </div>
-
                     <div class="header-right">
-                        <button class="icon-btn" onclick="navigateTo('manual')" title="Manual de Usuario">
-                            📖
-                        </button>
-                        <button class="icon-btn" onclick="navigateTo('ajustes')" title="Atajos: Ctrl+K">
-                            🔍
-                        </button>
-                        <button class="icon-btn notification-btn" onclick="toggleNotifications()" title="Notificaciones">
+                        <button class="icon-btn" onclick="toggleCommandPalette()" title="Buscar (Ctrl+K)">🔍</button>
+                        <button class="icon-btn" onclick="toggleNotifications()" title="Notificaciones">
                             🔔
-                            <span class="notification-badge" id="notifBadge">0</span>
+                            <span id="notifBadge" class="notification-badge" style="display: none;">0</span>
                         </button>
                         <button class="theme-toggle" onclick="toggleTheme()" title="Cambiar tema">
                             <span id="themeIcon">🌓</span>
                         </button>
-
-                        <!-- User dropdown -->
                         <div class="user-dropdown-container">
-                            <button class="user-trigger" onclick="toggleUserMenu()">
-                                <div class="avatar" id="userAvatar">U</div>
+                            <div class="user-trigger" onclick="toggleUserMenu()">
+                                <div id="userAvatar" class="avatar">U</div>
                                 <span id="userDisplay">Usuario</span>
                                 <span>▼</span>
-                            </button>
-                            <div class="dropdown-menu" id="userMenu">
-                                <a href="#" onclick="openProfile(); return false;"> Mi Perfil</a>
-                                <a href="#" onclick="navigateTo('ajustes'); return false;">️ Ajustes</a>
+                            </div>
+                            <div id="userMenu" class="dropdown-menu">
+                                <a href="#" onclick="openProfile(); return false;">👤 Mi Perfil</a>
+                                <a href="#" onclick="navigateTo('ajustes'); return false;">⚙️ Ajustes</a>
                                 <a href="#" onclick="navigateTo('manual'); return false;">📖 Manual de Usuario</a>
                                 <div class="divider"></div>
                                 <a href="#" class="danger" onclick="handleLogout(); return false;">🚪 Cerrar Sesión</a>
@@ -124,48 +113,41 @@
                     </div>
                 </header>
 
-                <!-- Content -->
-                <main class="content" id="contentArea">
-                    <!-- Rendered dynamically -->
-                </main>
+                <!-- Content Area -->
+                <main id="contentArea" class="content"></main>
             </div>
         </div>
 
-        <!-- Modals -->
+        <!-- OVERLAYS Y MODALES -->
         <div id="modalContainer"></div>
         <div id="toastContainer"></div>
+        
+        <!-- Panel de Notificaciones -->
         <div id="notificationsPanel" class="notifications-panel"></div>
 
-        <!-- Command Palette Global -->
-        <div id="commandPalette" class="command-palette-overlay" style="display: none;">
+        <!-- Command Palette -->
+        <div id="commandPalette" class="command-palette-overlay" style="display: none;" onclick="if(event.target===this) closeCommandPalette()">
             <div class="command-palette">
                 <div class="command-palette-header">
                     <span class="command-palette-icon">🔍</span>
-                    <input type="text" id="commandPaletteInput" class="command-palette-input" placeholder="Buscar en casos, bugs, APIs, ejecuciones...">
-                    <kbd class="command-palette-shortcut">ESC</kbd>
+                    <input type="text" id="commandPaletteInput" class="command-palette-input" placeholder="Escribe para buscar en todos los módulos...">
+                    <span class="command-palette-shortcut">ESC</span>
                 </div>
-                <div id="commandPaletteResults" class="command-palette-results">
-                    <div class="command-palette-hint">
-                        <span>💡 Escribe para buscar en todos los módulos</span>
-                    </div>
-                </div>
+                <div id="commandPaletteResults" class="command-palette-results"></div>
                 <div class="command-palette-footer">
-                    <span class="command-palette-footer-item"><kbd>↑↓</kbd> Navegar</span>
-                    <span class="command-palette-footer-item"><kbd></kbd> Seleccionar</span>
-                    <span class="command-palette-footer-item"><kbd>ESC</kbd> Cerrar</span>
+                    <div class="command-palette-footer-item"><kbd>↑↓</kbd> Navegar</div>
+                    <div class="command-palette-footer-item"><kbd>↵</kbd> Seleccionar</div>
+                    <div class="command-palette-footer-item"><kbd>ESC</kbd> Cerrar</div>
                 </div>
             </div>
         </div>
-        <!-- Firebase -->
+                <!-- Firebase SDK -->
         <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
         <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-
-        <!-- SheetJS para exportar Excel -->
-        <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.mini.min.js"></script>
+        <!-- SheetJS para Excel -->
+        <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js"></script>
-
-        <!-- Tu app (debe ir DESPUÉS de SheetJS) -->
+        <script>pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';</script>
         <script src="app.js"></script>
     </body>
 
