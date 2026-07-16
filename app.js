@@ -2123,7 +2123,7 @@
 
     function renderObjetivos() {
         const data = filterByProject(appData.objetivos);
-        const cols = [{ label: 'ID' }, { label: 'Objetivo' }, { label: 'Responsable' }, { label: 'Inic io' }, { label: 'Fin' }, { label: 'Estado' }];
+        const cols = [{ label: 'ID' }, { label: 'Objetivo' }, { label: 'Responsable' }, { label: 'Inicio' }, { label: 'Fin' }, { label: 'Estado' }];
         return '<h1 class="page-title">🎯 Objetivos</h1>' + renderTable('objetivos', cols, data, i => `<td>${i.id}</td><td>${i.objetivo || ''}</td><td>${i.responsable || '-'}</td><td>${i.fechaInicio || '-'}</td><td>${i.fechaFin || '-'}</td><td><span class="badge ${i.estado === 'Finalizado' ? 'badge-success' : i.estado === 'En progreso' ? 'badge-info' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
     }
 
