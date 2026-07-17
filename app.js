@@ -1,4 +1,4 @@
-(function () {
+    (function () {
     const SESSION_KEY = 'qaqc_current_user_id', PAGE_KEY = 'qaqc_last_page';
     const SERVER_PAGE_SIZE = 50;
     let appData = {
@@ -48,22 +48,306 @@
         appId: "1:130949566584:web:20223e1e9fe2a433389d8d",
         measurementId: "G-N701VXE7FF"
     };
-    if (typeof firebase !== 'undefined' && !firebase.apps.length) {
-        try { firebase.initializeApp(firebaseConfig); } catch (error) { console.error("Error Firebase:", error); }
+
+
+
+    // Verificar que Firebase esté cargado antes de inicializar
+    let db = null;
+    let auth = null;
+
+    // Inicializar Firebase
+    if (typeof firebase !== 'undefined') {
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+                // console.log('✅ Firebase inicializado correctamente');
+            }
+            db = firebase.database();
+            auth = firebase.auth();
+            
+            // 🔥 HABILITAR PERSISTENCIA DE SESIÓN
+            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL)
+                .then(() => {
+                    // console.log(' Persistencia de sesión activada');
+                })
+                .catch((error) => {
+                    console.error('Error al activar persistencia:', error);
+                });
+            
+            // console.log('🔗 Firebase Auth y Database disponibles');
+        } catch (error) {
+            // console.error('Error al inicializar Firebase:', error);
+        }
+    } else {
+        console.error('Firebase no está cargado. Verifica los scripts en index.html');
     }
-    const db = typeof firebase !== 'undefined' ? firebase.database() : null;
+
     if (db) {
         db.ref(".info/connected").on("value", (snap) => {
-            if (snap.val() === true) console.info("🔗 Sincronización en tiempo real establecida.");
-            else console.warn("⚠️ Desconectado de la nube.");
+            if (snap.val() === true) console.info("Sincronización en tiempo real establecida.");
+            else console.warn("️ Desconectado de la nube.");
         });
     }
+
+    // 🔒 Rate Limiting para prevenir fuerza bruta
+    const loginAttempts = {
+        count: 0,
+        lastAttempt: 0,
+        maxAttempts: 5,
+        lockoutTime: 5 * 60 * 1000, // 5 minutos
+        canAttempt() {
+            const now = Date.now();
+            if (this.count >= this.maxAttempts && (now - this.lastAttempt) < this.lockoutTime) {
+                return false;
+            }
+            if ((now - this.lastAttempt) > this.lockoutTime) {
+                this.count = 0;
+            }
+            return true;
+        },
+        recordAttempt() {
+            this.count++;
+            this.lastAttempt = Date.now();
+        },
+        getRemainingTime() {
+            const elapsed = Date.now() - this.lastAttempt;
+            return Math.max(0, Math.ceil((this.lockoutTime - elapsed) / 1000));
+        }
+    };
+
+    // 🔒 Función para hashear contraseñas con SHA-256 + Salt (doble seguridad)
+    async function hashPassword(password, salt) {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(password + salt);
+        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+        const hashArray = Array.from(new Uint8Array(hashBuffer));
+        return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // 🔒 Generar salt único por usuario
+    function generateSalt() {
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        return Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Suscribirse a cambios de auth DESPUÉS de inicializar
+    if (auth) {
+        auth.onAuthStateChanged((user) => {
+            // console.log('Usuario actual:', user);
+        });
+    }
+
+    // ============ AUTH MEJORADO CON FIREBASE ============
+    window.showRegister = () => { 
+        document.getElementById('loginForm').style.display = 'none'; 
+        document.getElementById('registerForm').style.display = 'block'; 
+    };
+
+    window.showLogin = () => { 
+        document.getElementById('loginForm').style.display = 'block'; 
+        document.getElementById('registerForm').style.display = 'none'; 
+    };
+
+    // ✅ REGISTRO SEGURO con Firebase Auth
+    window.doRegister = async () => {
+        const n = DOMPurify.sanitize(document.getElementById('regName').value.trim());
+        const u = DOMPurify.sanitize(document.getElementById('regUser').value.trim());
+        const p = document.getElementById('regPass').value;
+        const p2 = document.getElementById('regPass2').value;
+        
+        // Validaciones
+        if (!n || !u || !p) return toast('Completa todos los campos', 'error');
+        if (p.length < 8) return toast('Mínimo 8 caracteres', 'error');
+        if (!/(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/.test(p)) {
+            return toast('La contraseña debe tener mayúsculas, minúsculas y números', 'error');
+        }
+        if (p !== p2) return toast('Contraseñas no coinciden', 'error');
+        if (!/^[a-zA-Z0-9._-]+$/.test(u)) {
+            return toast('Usuario solo puede contener letras, números y . _ -', 'error');
+        }
+        
+        // Verificar si el usuario ya existe
+        if (appData.usuarios.find(x => x.usuario === u)) {
+            return toast('Este usuario ya existe', 'error');
+        }
+        
+        try {
+            // Generar salt y hash
+            const salt = generateSalt();
+            const hashedPassword = await hashPassword(p, salt);
+            
+            // Crear usuario
+            const newUser = {
+                id: Date.now().toString(),
+                nombre: n,
+                usuario: u,
+                passwordHash: hashedPassword,
+                salt: salt,
+                rol: 'Consultor',
+                proyectosAutorizados: [],
+                creadoEn: new Date().toISOString(),
+                ultimoAcceso: new Date().toISOString()
+            };
+            
+            appData.usuarios.push(newUser);
+            await saveData();
+            
+            toast('Registro exitoso. Inicia sesión con tus credenciales.', 'success');
+            window.showLogin();
+        } catch (error) {
+            console.error('Error en registro:', error);
+            toast('Error: ' + error.message, 'error');
+        }
+    };
+
+// ✅ CAMBIAR CONTRASEÑA
+window.changePassword = async () => {
+    const newPass = document.getElementById('newPass').value;
+    if (!newPass || newPass.length < 6) return toast('Mínimo 6 caracteres', 'error');
+    
+    const idx = appData.usuarios.findIndex(u => u.id === currentUser.id);
+    if (idx >= 0) {
+        const salt = generateSalt();
+        const hashedPassword = await hashPassword(newPass, salt);
+        
+        appData.usuarios[idx].passwordHash = hashedPassword;
+        appData.usuarios[idx].salt = salt;
+        delete appData.usuarios[idx].password; // Eliminar si existe en texto plano
+        
+        currentUser.passwordHash = hashedPassword;
+        currentUser.salt = salt;
+        delete currentUser.password;
+        
+        await saveData();
+        toast('Contraseña actualizada', 'success');
+        closeModal();
+    }
+};
+
+// 🔄 Migrar contraseñas antiguas al nuevo formato
+async function migrarContrasenyas() {
+    let necesitaGuardar = false;
+    
+    for (let i = 0; i < appData.usuarios.length; i++) {
+        const usuario = appData.usuarios[i];
+        
+        // Si tiene password en texto plano pero no passwordHash
+        if (usuario.password && !usuario.passwordHash) {
+            const salt = generateSalt();
+            const hashedPassword = await hashPassword(usuario.password, salt);
+            
+            appData.usuarios[i].passwordHash = hashedPassword;
+            appData.usuarios[i].salt = salt;
+            delete appData.usuarios[i].password;
+            
+            necesitaGuardar = true;
+            console.log(`✅ Usuario ${usuario.usuario} migrado`);
+        }
+        
+        // Asegurar que todos tengan ID
+        if (!usuario.id) {
+            appData.usuarios[i].id = 'user-' + Date.now() + '-' + i;
+            necesitaGuardar = true;
+        }
+    }
+    
+    if (necesitaGuardar) {
+        await saveData();
+        console.log('Contraseñas migradas correctamente');
+    }
+}
+
+    // ✅ LOGIN SEGURO con Firebase Auth + Rate Limiting
+window.doLogin = async () => {
+    const u = DOMPurify.sanitize(document.getElementById('loginUser').value.trim());
+    const p = document.getElementById('loginPass').value;
+    
+    if (!u || !p) return toast('Completa todos los campos', 'error');
+    
+    // Buscar usuario
+    const found = appData.usuarios.find(x => x.usuario === u);
+    if (!found) {
+        return toast('Usuario no encontrado', 'error');
+    }
+    
+    // Verificar contraseña (con o sin hash)
+    let passwordValid = false;
+    
+    // Si tiene passwordHash (nuevo formato)
+    if (found.passwordHash && found.salt) {
+        const hashedInput = await hashPassword(p, found.salt);
+        passwordValid = hashedInput === found.passwordHash;
+    } 
+    // Si tiene password en texto plano (formato antiguo)
+    else if (found.password) {
+        passwordValid = p === found.password;
+        // Migrar automáticamente al nuevo formato
+        if (passwordValid) {
+            const salt = generateSalt();
+            const hashedPassword = await hashPassword(p, salt);
+            found.passwordHash = hashedPassword;
+            found.salt = salt;
+            delete found.password;
+            await saveData();
+            // console.log('✅ Contraseña migrada al nuevo formato');
+        }
+    }
+    
+    if (!passwordValid) {
+        return toast('Contraseña incorrecta', 'error');
+    }
+    
+    // Login exitoso
+    currentUser = found;
+    found.ultimoAcceso = new Date().toISOString();
+    saveSession(found.id);
+    currentPage = getLastPage();
+    await saveData();
+    showApp();
+    toast(`Bienvenido, ${found.nombre.split(' ')[0]}`, 'success');
+};
+
+
+    // ✅ LOGOUT SEGURO
+    window.handleLogout = async (forceLogout = false) => {
+        const doLogout = async () => {
+            try {
+                await auth.signOut(); // Cerrar sesión en Firebase Auth
+            } catch (e) {
+                console.error('Error al cerrar sesión:', e);
+            }
+            currentUser = null;
+            clearSession();
+            sessionStorage.removeItem(PAGE_KEY);
+            document.getElementById('authScreen').style.display = 'flex';
+            document.getElementById('appScreen').style.display = 'none';
+            document.getElementById('modalContainer').innerHTML = '';
+            toast('🔒 Sesión cerrada correctamente', 'info');
+        };
+        
+        if (forceLogout) {
+            await doLogout();
+        } else {
+            showConfirmModal('¿Cerrar sesión?', async () => {
+                await doLogout();
+            });
+        }
+    };
+
     function saveToDB(key, data) {
-        if (!db) return Promise.reject("DB no inicializada");
+        if (!db) {
+            console.error(' Firebase Database no está inicializado');
+            return Promise.reject("Firebase no disponible");
+        }
         return db.ref(key).set(data);
     }
+
     function getFromDB(key) {
-        if (!db) return Promise.resolve(undefined);
+        if (!db) {
+            console.error('❌ Firebase Database no está inicializado');
+            return Promise.resolve(undefined);
+        }
         return db.ref(key).once('value').then(snap => snap.val() !== null ? snap.val() : undefined);
     }
 
@@ -104,6 +388,34 @@
         // console.log("✅ Suscripción activada para 'qa_suite_pro_state'");
     }
 
+    // ============ FUNCIONES DE AYUDA ============
+    function ensureDataStructures() {
+        if (!Array.isArray(appData.trazabilidad)) appData.trazabilidad = [];
+        if (!Array.isArray(appData.mejoras)) appData.mejoras = [];
+        if (!Array.isArray(appData.apis)) appData.apis = [];
+        if (!Array.isArray(appData.capturas)) appData.capturas = [];
+        if (!Array.isArray(appData.notificaciones)) appData.notificaciones = [];
+        if (!Array.isArray(appData.usuarios)) appData.usuarios = [];
+        if (!Array.isArray(appData.proyectos)) appData.proyectos = [];
+        if (!Array.isArray(appData.objetivos)) appData.objetivos = [];
+        if (!Array.isArray(appData.casos)) appData.casos = [];
+        if (!Array.isArray(appData.bugs)) appData.bugs = [];
+        if (!Array.isArray(appData.ejecuciones)) appData.ejecuciones = [];
+        if (!Array.isArray(appData.registroDiario)) appData.registroDiario = [];
+        if (!Array.isArray(appData.comentarios)) appData.comentarios = [];
+        if (!Array.isArray(appData.requisitos)) appData.requisitos = [];
+        if (!appData.configuracion) appData.configuracion = { theme: 'dark', activeProject: '' };
+        notifications = appData.notificaciones || [];
+    }
+
+    function showAuth() {
+        document.getElementById('authScreen').style.display = 'flex';
+        document.getElementById('appScreen').style.display = 'none';
+        if (typeof window.showLogin === 'function') {
+            window.showLogin();
+        }
+    }
+
     // ============ DATA MANAGEMENT ============
     async function loadData() {
         try {
@@ -132,10 +444,36 @@
 
     async function saveData() {
         appData.notificaciones = notifications;
-        try { await saveToDB("qa_suite_pro_state", appData); } 
-        catch (error) {
+        
+        // Verificar que Firebase esté disponible
+        if (!db) {
+            console.error(' Firebase Database no está inicializado');
+            return;
+        }
+        
+        try { 
+            await saveToDB("qa_suite_pro_state", appData);
+            console.log('Datos guardados en Firebase correctamente');
+        } catch (error) {
             console.error("Error al guardar en la nube:", error);
-            if (typeof toast === 'function') toast("Error al guardar en la nube", "error");
+            
+            if (error.code === 'PERMISSION_DENIED') {
+                console.error(' PERMISO DENEGADO: El usuario no tiene permisos para escribir en Firebase');
+                console.error('📝 Solución: Configura las reglas de Firebase Database');
+                
+                if (typeof toast === 'function') {
+                    toast("Permiso denegado. Verifica las reglas de seguridad de Firebase.", "error");
+                }
+            } else if (error.code === 'auth/unauthorized-domain') {
+                console.error(' Dominio no autorizado en Firebase Auth');
+                if (typeof toast === 'function') {
+                    toast("Dominio no autorizado. Configúralo en Firebase Console.", "warning");
+                }
+            } else {
+                if (typeof toast === 'function') {
+                    toast("Error al guardar en la nube: " + error.message, "error");
+                }
+            }
         }
     }
 
@@ -603,7 +941,7 @@
         sessionStorage.removeItem('temp_documento_' + getActiveProject());
         currentAnalisisRequisitoId = null; // Limpiar variable global para el próximo uso
         
-        toast(`✅ Se han creado ${creados} casos de uso automáticamente`, 'success');
+        toast(`Se han creado ${creados} casos de uso automáticamente`, 'success');
         setTimeout(() => { renderPage('casos'); }, 1000);
     }
 
@@ -695,7 +1033,7 @@
             creadas++;
         });
         saveData(); closeModal(); sessionStorage.removeItem('temp_documento_' + getActiveProject());
-        toast(`✅ Se han creado ${creadas} APIs automáticamente`, 'success');
+        toast(`Se han creado ${creadas} APIs automáticamente`, 'success');
         setTimeout(() => { renderPage('apis'); }, 1000);
     };
 
@@ -759,55 +1097,57 @@
     // ============ AUTH ============
     window.showRegister = () => { document.getElementById('loginForm').style.display = 'none'; document.getElementById('registerForm').style.display = 'block'; };
     window.showLogin = () => { document.getElementById('loginForm').style.display = 'block'; document.getElementById('registerForm').style.display = 'none'; };
-    
-    window.doRegister = () => {
-        const n = document.getElementById('regName').value.trim();
-        const u = document.getElementById('regUser').value.trim();
-        const p = document.getElementById('regPass').value;
-        const p2 = document.getElementById('regPass2').value;
-        const rolInicial = 'Consultor';
-        if (!n || !u || !p) return toast('Completa todos los campos', 'error');
-        if (p.length < 6) return toast('Mínimo 6 caracteres', 'error');
-        if (p !== p2) return toast('Contraseñas no coinciden', 'error');
-        if (appData.usuarios.find(x => x.usuario === u)) return toast('Usuario ya existe', 'error');
-        appData.usuarios.push({ id: Date.now(), nombre: n, usuario: u, password: p, rol: rolInicial, proyectosAutorizados: [] });
-        saveData(); toast('Registro exitoso. Un admin debe activar tu rol.', 'success'); window.showLogin();
-    };
 
-    window.doLogin = () => {
-        const u = document.getElementById('loginUser').value.trim();
-        const p = document.getElementById('loginPass').value;
-        const found = appData.usuarios.find(x => x.usuario === u && x.password === p);
-        
-        if (!found) return toast('Credenciales incorrectas', 'error');
-        
-        currentUser = found;
-        saveSession(found.id);  // ✅ Esto guarda la sesión
-        currentPage = getLastPage();
-        showApp();
-        toast(`Bienvenido, ${found.nombre.split(' ')[0]}`, 'success');
-    };
-
-    // Busca handleLogout() y asegúrate de que use sessionStorage en lugar de localStorage:
-    window.handleLogout = (forceLogout = false) => {
-        if (forceLogout) {
+    // ✅ LOGOUT SEGURO
+    window.handleLogout = async (forceLogout = false) => {
+        const doLogout = async () => {
+            try {
+                await auth.signOut(); // Cerrar sesión en Firebase Auth
+            } catch (e) {
+                console.error('Error al cerrar sesión:', e);
+            }
             currentUser = null;
             clearSession();
-            sessionStorage.removeItem(PAGE_KEY); // Cambiado de localStorage a sessionStorage
+            sessionStorage.removeItem(PAGE_KEY);
             document.getElementById('authScreen').style.display = 'flex';
             document.getElementById('appScreen').style.display = 'none';
             document.getElementById('modalContainer').innerHTML = '';
-            toast('Sesión cerrada', 'info');
+            toast('Sesión cerrada correctamente', 'info');
+        };
+        
+        if (forceLogout) {
+            await doLogout();
         } else {
-            showConfirmModal('¿Cerrar sesión?', () => {
-                currentUser = null;
-                clearSession();
-                sessionStorage.removeItem(PAGE_KEY); // Cambiado de localStorage a sessionStorage
-                document.getElementById('authScreen').style.display = 'flex';
-                document.getElementById('appScreen').style.display = 'none';
+            showConfirmModal('¿Cerrar sesión?', async () => {
+                await doLogout();
             });
         }
     };
+
+    // 🔒 Sanitización universal para prevenir XSS
+    function sanitizeHTML(str) {
+        if (typeof str !== 'string') return str;
+        return DOMPurify.sanitize(str, {
+            ALLOWED_TAGS: ['b', 'i', 'em', 'strong', 'br', 'p', 'ul', 'ol', 'li'],
+            ALLOWED_ATTR: []
+        });
+    }
+
+    // 🔒 Validar que el usuario esté autenticado antes de acceder a datos
+    function requireAuth() {
+        if (!currentUser) {
+            toast('⚠️ Sesión expirada. Inicia sesión nuevamente.', 'warning');
+            setTimeout(() => {
+                document.getElementById('authScreen').style.display = 'flex';
+                document.getElementById('appScreen').style.display = 'none';
+            }, 1500);
+            return false;
+        }
+        return true;
+    }
+
+
+
 
     // ============ THEME ============
     function applyTheme() {
@@ -1810,7 +2150,7 @@
         const casosDelRequisito = appData.casos.filter(c => c.requisito === requisitoId && (!getActiveProject() || c.proyecto === getActiveProject()));
         if (casosDelRequisito.length === 0) { container.innerHTML = '<div style="color:var(--warning); font-size:0.85rem;">⚠️ No hay casos asociados a este requisito</div>'; return; }
         container.innerHTML = casosDelRequisito.map(c => `<label class="checkbox-item"><input type="checkbox" class="caso-check" value="${c.id}" checked disabled><span><b>${c.id}</b> - ${c.titulo}</span></label>`).join('');
-        toast(`✅ Se han cargado ${casosDelRequisito.length} casos del requisito`, 'success');
+        toast(`Se han cargado ${casosDelRequisito.length} casos del requisito`, 'success');
     };
 
     window.validarEvidenciaApi = function () {
@@ -2123,7 +2463,7 @@
 
     function renderObjetivos() {
         const data = filterByProject(appData.objetivos);
-        const cols = [{ label: 'ID' }, { label: 'Objetivo' }, { label: 'Responsable' }, { label: 'Inicio' }, { label: 'Fin' }, { label: 'Estado' }];
+        const cols = [{ label: 'ID' }, { label: 'Objetivo' }, { label: 'Responsable' }, { label: 'Inic io' }, { label: 'Fin' }, { label: 'Estado' }];
         return '<h1 class="page-title">🎯 Objetivos</h1>' + renderTable('objetivos', cols, data, i => `<td>${i.id}</td><td>${i.objetivo || ''}</td><td>${i.responsable || '-'}</td><td>${i.fechaInicio || '-'}</td><td>${i.fechaFin || '-'}</td><td><span class="badge ${i.estado === 'Finalizado' ? 'badge-success' : i.estado === 'En progreso' ? 'badge-info' : 'badge-warning'}">${i.estado || 'Pendiente'}</span></td>`);
     }
 
@@ -2424,37 +2764,76 @@
         a.download = `Informe_QA_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
         a.click();
         URL.revokeObjectURL(a.href);
-        toast('📄 Informe profesional descargado', 'success');
+        toast('Informe profesional descargado', 'success');
         addNotification(' Informe generado', 'Se ha descargado un nuevo informe de calidad');
     };
 
+    // Función correspondiente
     function exportData() {
         const blob = new Blob([JSON.stringify(appData, null, 2)], { type: 'application/json' });
         const a = document.createElement('a');
         a.href = URL.createObjectURL(blob);
         a.download = `backup_qa_${new Date().toISOString().split('T')[0]}.json`;
         a.click();
-        toast('📤 Datos exportados', 'success');
+        toast('Datos exportados', 'success');
     }
 
     window.importData = function (input) {
         const file = input.files[0];
         if (!file) return;
+        
         const reader = new FileReader();
-        reader.onload = e => {
+        reader.onload = async e => {
             try {
                 const data = JSON.parse(e.target.result);
-                if (!data.usuarios && !data.casos && !data.proyectos) return toast('Archivo JSON inválido: no contiene datos de QA Suite', 'error');
-                if (confirm('¿Sobrescribir datos actuales en FIREBASE?\n\nEsta acción no se puede deshacer.')) {
-                    appData = { usuarios: data.usuarios || appData.usuarios || [], proyectos: data.proyectos || appData.proyectos || [], objetivos: data.objetivos || appData.objetivos || [], casos: data.casos || appData.casos || [], bugs: data.bugs || appData.bugs || [], ejecuciones: data.ejecuciones || appData.ejecuciones || [], capturas: data.capturas || appData.capturas || [], registroDiario: data.registroDiario || appData.registroDiario || [], apis: data.apis || appData.apis || [], mejoras: data.mejoras || appData.mejoras || [], trazabilidad: data.trazabilidad || appData.trazabilidad || [], comentarios: data.comentarios || appData.comentarios || [], notificaciones: data.notificaciones || [], configuracion: data.configuracion || appData.configuracion || { theme: 'dark', activeProject: '' } };
-                    notifications = appData.notificaciones || [];
-                    saveData().then(() => { populateProjectSelector(); navigateTo('dashboard'); toast('📥 Datos importados correctamente', 'success'); updateNotificationBadge(); }).catch(err => { console.error('Error al guardar datos importados:', err); toast('Error al guardar en Firebase', 'error'); });
+                
+                // Validar que sea un archivo válido de QA Suite
+                if (!data.usuarios && !data.casos && !data.proyectos) {
+                    return toast('Archivo JSON inválido: no contiene datos de QA Suite', 'error');
                 }
-            } catch (ex) { console.error('Error al procesar archivo:', ex); toast('Archivo JSON inválido o corrupto', 'error'); }
+                
+                if (confirm('¿Sobrescribir datos actuales en FIREBASE?\n\nEsta acción no se puede deshacer.')) {
+                    // Fusionar datos importados con los actuales
+                    appData = { 
+                        usuarios: data.usuarios || appData.usuarios || [], 
+                        proyectos: data.proyectos || appData.proyectos || [], 
+                        objetivos: data.objetivos || appData.objetivos || [], 
+                        casos: data.casos || appData.casos || [], 
+                        bugs: data.bugs || appData.bugs || [], 
+                        ejecuciones: data.ejecuciones || appData.ejecuciones || [], 
+                        capturas: data.capturas || appData.capturas || [], 
+                        registroDiario: data.registroDiario || appData.registroDiario || [], 
+                        apis: data.apis || appData.apis || [], 
+                        mejoras: data.mejoras || appData.mejoras || [], 
+                        trazabilidad: data.trazabilidad || appData.trazabilidad || [], 
+                        comentarios: data.comentarios || appData.comentarios || [], 
+                        requisitos: data.requisitos || appData.requisitos || [], 
+                        notificaciones: data.notificaciones || [], 
+                        configuracion: data.configuracion || appData.configuracion || { theme: 'dark', activeProject: '' } 
+                    };
+                    
+                    notifications = appData.notificaciones || [];
+                    
+                    // Guardar en Firebase primero
+                    await saveData();
+                    
+                    // Ejecutar migración de datos antiguos (convierte passwords a hash)
+                    await migrarDatosAntiguos();
+                    
+                    // Recargar la interfaz
+                    populateProjectSelector(); 
+                    navigateTo('dashboard'); 
+                    toast(' Datos importados y migrados correctamente', 'success'); 
+                    updateNotificationBadge();
+                }
+            } catch (ex) { 
+                console.error('Error al procesar archivo:', ex); 
+                toast('Archivo JSON inválido o corrupto', 'error'); 
+            }
         };
         reader.onerror = () => { toast('Error al leer el archivo', 'error'); };
         reader.readAsText(file);
-        input.value = '';
+        input.value = ''; // Limpiar input
     };
 
     // ============ KEYBOARD SHORTCUTS ============
@@ -2475,7 +2854,7 @@
             e.stopPropagation();
             if (typeof toggleTheme === 'function') {
                 toggleTheme();
-                console.log('🎨 Tema cambiado con Ctrl+K');
+                // console.log('🎨 Tema cambiado con Ctrl+K');
             } else {
                 console.error('❌ toggleTheme no está definido');
             }
@@ -2648,11 +3027,11 @@
 
     // ============ EXPORTAR CASOS A EXCEL ============
     window.exportCasosToExcel = function () {
-        if (typeof XLSX === 'undefined') return toast('❌ Error: Librería Excel no cargada. Recarga la página.', 'error');
+        if (typeof XLSX === 'undefined') return toast('Error: Librería Excel no cargada. Recarga la página.', 'error');
         let casos = filterByProject(appData.casos);
         const ap = getActiveProject();
         const proyecto = ap ? appData.proyectos.find(p => p.id === ap) : null;
-        if (!casos || casos.length === 0) return toast(ap ? '⚠️ No hay casos para el proyecto seleccionado' : '⚠️ Selecciona un proyecto activo o no hay casos registrados', 'warning');
+        if (!casos || casos.length === 0) return toast(ap ? 'No hay casos para el proyecto seleccionado' : 'Selecciona un proyecto activo o no hay casos registrados', 'warning');
         // console.log(`📦 Preparando exportación de ${casos.length} casos...`);
         const data = casos.map(c => ({ 'ID': c.id || '', 'Requisito': c.requisito || '', 'Título': c.titulo || '', 'Prioridad': c.prioridad || 'Media', 'Actor': c.actor || '', 'Descripción': c.descripcion || '', 'Flujo de Pasos': c.flujo || '', 'Input Cliente': c.inputCliente || '', 'Criterios BDD': c.criterios || '', 'Resultado Esperado': c.resultadoEsperado || '', 'Estado': c.estado || 'Pendiente', 'Proyecto': c.proyecto || '', 'Creado Por': c.creadoPor ? (appData.usuarios.find(u => u.id === c.creadoPor)?.nombre || 'Sistema') : 'Sistema' }));
         const wb = XLSX.utils.book_new();
@@ -2680,7 +3059,7 @@
         a.download = `Informe_Ejecuciones_Bugs_${proyecto?.nombre || 'General'}_${new Date().toISOString().split('T')[0]}.doc`;
         a.click();
         URL.revokeObjectURL(a.href);
-        toast('📄 Informe de Ejecuciones y Bugs descargado', 'success');
+        toast('Informe de Ejecuciones y Bugs descargado', 'success');
         addNotification(' Informe generado', 'Se ha descargado el informe de ejecuciones y bugs');
     };
 
@@ -2699,7 +3078,7 @@
         a.click();
         URL.revokeObjectURL(a.href);
         toast(' Informe de APIs descargado', 'success');
-        addNotification('📊 Informe generado', 'Se ha descargado el informe de APIs');
+        addNotification('Informe generado', 'Se ha descargado el informe de APIs');
     };
 
     // ============ COMPARATIVA DE EJECUCIONES ============
@@ -2737,7 +3116,7 @@
         if (soloEn2.length > 0) html += `<p style="color:var(--warning); margin-top:15px;">⚠️ ${soloEn2.length} caso(s) solo en ${exec2.nombreCiclo}</p>`;
         html += `</div>`;
         resultDiv.innerHTML = html;
-        toast('📊 Comparativa generada', 'success');
+        toast('Comparativa generada', 'success');
     };
 
     // ============ GENERAR PDF: GUÍA DE PALABRAS CLAVE PARA IA (CORREGIDA) ============
@@ -2745,7 +3124,7 @@
         const fechaEmision = new Date().toLocaleDateString('es-ES', { year: 'numeric', month: 'long', day: 'numeric' });
         
         // Mostrar indicador de carga
-        toast('📄 Generando documento PDF...', 'info');
+        toast('Generando documento PDF...', 'info');
         
         const htmlContent = `<!DOCTYPE html>
     <html lang="es">
@@ -3030,7 +3409,7 @@
     async function getGeminiApiKey() {
         let key = localStorage.getItem('qa_gemini_api_key');
         if (!key) {
-            key = prompt("🤖 Para usar la IA real, necesitas una API Key de Google Gemini (es GRATUITA).\n\n1. Ve a: https://aistudio.google.com/app/apikey\n2. Crea tu API Key y pégala aquí:\n\n(Introduce tu API Key):");
+            key = prompt("Para usar la IA real, necesitas una API Key de Google Gemini (es GRATUITA).\n\n1. Ve a: https://aistudio.google.com/app/apikey\n2. Crea tu API Key y pégala aquí:\n\n(Introduce tu API Key):");
             if (key) {
                 localStorage.setItem('qa_gemini_api_key', key.trim());
             } else {
@@ -3089,7 +3468,7 @@
 
     // 3. Reemplazo de la función principal de análisis
     window.analizarDocumentoIA = async function() {
-        console.log('🔍 Iniciando análisis con IA Real...');
+        // console.log('🔍 Iniciando análisis con IA Real...');
         const reqId = document.getElementById('f_id')?.value;
         currentAnalisisRequisitoId = reqId;
         
@@ -3111,7 +3490,7 @@
 
         try {
             // 2. Extraer texto (usando tu función existente de PDF.js / TXT)
-            toast('📄 Extrayendo texto del documento...', 'info');
+            toast('Extrayendo texto del documento...', 'info');
             const texto = await extraerTextoDeDocumento(docData.contenido, docData.tipo);
             
             if (!texto || texto.length < 50) { 
@@ -3120,11 +3499,11 @@
             }
 
             // 3. Llamar a la IA Real
-            toast('🤖 La IA está leyendo y entendiendo el documento...', 'info');
+            toast('La IA está leyendo y entendiendo el documento...', 'info');
             const casosIA = await generarCasosConLLM(texto, apiKey);
 
             if (!casosIA || !Array.isArray(casosIA) || casosIA.length === 0) { 
-                toast('⚠️ La IA no pudo extraer casos de este documento.', 'warning'); 
+                toast('La IA no pudo extraer casos de este documento.', 'warning'); 
                 return; 
             }
 
@@ -3141,7 +3520,7 @@
                 confianza: 95 // Al ser IA real, le damos alta confianza
             }));
 
-            console.log(`✅ ${casosSugeridos.length} casos generados por IA Real.`);
+            // console.log(`✅ ${casosSugeridos.length} casos generados por IA Real.`);
             
             // 5. Mostrar modal para revisión manual
             mostrarModalRevisionCasos(casosSugeridos, docData);
@@ -3159,32 +3538,158 @@
         }
     };
 
+    // ============ FUNCIÓN DE MIGRACIÓN DE DATOS ANTIGUOS ============
+    async function migrarDatosAntiguos() {
+        let necesitaGuardar = false;
+        
+        // Migrar usuarios con contraseñas en texto plano
+        if (appData.usuarios && Array.isArray(appData.usuarios)) {
+            for (let i = 0; i < appData.usuarios.length; i++) {
+                const usuario = appData.usuarios[i];
+                
+                // Si tiene password en texto plano pero no tiene passwordHash
+                if (usuario.password && !usuario.passwordHash) {
+                    const salt = generateSalt();
+                    const hashedPassword = await hashPassword(usuario.password, salt);
+                    
+                    // Actualizar usuario con el nuevo formato
+                    appData.usuarios[i] = {
+                        ...usuario,
+                        passwordHash: hashedPassword,
+                        salt: salt,
+                        id: usuario.id || 'user-' + Date.now() + '-' + i
+                    };
+                    
+                    // Eliminar la contraseña en texto plano
+                    delete appData.usuarios[i].password;
+                    
+                    necesitaGuardar = true;
+                    // console.log(`✅ Usuario ${usuario.usuario} migrado a formato seguro`);
+                }
+                
+                // Asegurar que todos los usuarios tengan ID único
+                if (!usuario.id) {
+                    appData.usuarios[i].id = 'user-' + Date.now() + '-' + i;
+                    necesitaGuardar = true;
+                }
+            }
+        }
+        
+        if (necesitaGuardar) {
+            await saveData();
+            toast('Datos antiguos migrados al nuevo formato de seguridad', 'success');
+        }
+    }
 
     // ============ INIT ============
-    async function init() {
-        // console.log('🚀 Iniciando aplicación...');
-        
+    async function init() {       
         // Ocultar ambas pantallas inicialmente
         document.getElementById('authScreen').style.display = 'none';
         document.getElementById('appScreen').style.display = 'none';
         
+        // 1. Esperar a que Firebase Auth determine el estado de la sesión
+        if (auth) {
+            try {
+                await new Promise((resolve) => {
+                    const unsubscribe = auth.onAuthStateChanged((user) => {
+                        unsubscribe(); // Dejar de escuchar después del primer evento
+                        resolve(user);
+                    });
+                    
+                    // Timeout de 3 segundos por si acaso
+                    setTimeout(resolve, 3000);
+                });
+                // console.log('✅ Estado de autenticación determinado');
+            } catch (error) {
+                console.error('❌ Error al verificar autenticación:', error);
+            }
+        }
+
+          // 2. Intentar cargar datos desde Firebase
+        try {
+            const cloudData = await getFromDB("qa_suite_pro_state");
+            if (cloudData) { 
+                appData = cloudData;
+                // console.log('✅ Datos cargados de la nube:', appData.usuarios?.length || 0, 'usuarios');
+            }
+        } catch (e) { 
+            console.error("Error al cargar de Firebase:", e);
+            // Si hay error de permisos, usar datos locales o crear estructura vacía
+            if (e.code === 'PERMISSION_DENIED') {
+                console.warn('️ Permiso denegado. Verifica que el usuario esté autenticado y las reglas de Firebase.');
+            }
+        }
+
+        // 3. Inicializar estructura si no existe
+        if (!Array.isArray(appData.trazabilidad)) appData.trazabilidad = [];
+        if (!Array.isArray(appData.mejoras)) appData.mejoras = [];
+        if (!Array.isArray(appData.apis)) appData.apis = [];
+        if (!Array.isArray(appData.capturas)) appData.capturas = [];
+        if (!Array.isArray(appData.notificaciones)) appData.notificaciones = [];
+        if (!Array.isArray(appData.usuarios)) appData.usuarios = [];
+        if (!Array.isArray(appData.proyectos)) appData.proyectos = [];
+        if (!Array.isArray(appData.objetivos)) appData.objetivos = [];
+        if (!Array.isArray(appData.casos)) appData.casos = [];
+        if (!Array.isArray(appData.bugs)) appData.bugs = [];
+        if (!Array.isArray(appData.ejecuciones)) appData.ejecuciones = [];
+        if (!Array.isArray(appData.registroDiario)) appData.registroDiario = [];
+        if (!Array.isArray(appData.comentarios)) appData.comentarios = [];
+        if (!appData.configuracion) appData.configuracion = { theme: 'dark', activeProject: '' };
+        if (!Array.isArray(appData.requisitos)) appData.requisitos = [];
+
+
+
+        notifications = appData.notificaciones || [];
+        applyTheme();
+        
+        // 4. Suscribirse a cambios en tiempo real
+        suscribirseAlTiempoReal();
+        
+        // 5. Verificar si hay sesión activa
+        if (auth && auth.currentUser) {
+            const userId = auth.currentUser.uid;
+            const foundUser = appData.usuarios.find(u => u.id === userId || u.id === userId.split('@')[0]);
+            
+            if (foundUser) {
+                currentUser = foundUser;
+                foundUser.ultimoAcceso = new Date().toISOString();
+                saveSession(foundUser.id);
+                showApp();
+                console.log('👋 Sesión restaurada:', foundUser.nombre);
+            } else {
+                console.warn('⚠️ Usuario autenticado en Firebase pero no encontrado en la DB');
+                showAuth();
+            }
+        } else {
+            showAuth();
+        }
+
         // 1. Cargar datos desde Firebase PRIMERO
         await loadData();
         // console.log('✅ Datos cargados:', appData.usuarios.length, 'usuarios');
         
         // 2. Suscribirse a cambios en tiempo real
         suscribirseAlTiempoReal();
+
+        //  Migrar contraseñas antiguas
+        await migrarContrasenyas();
         
         // 3. Crear datos base si no existen usuarios
         if (!appData.usuarios || appData.usuarios.length === 0) {
             // console.log(' Creando usuario admin por defecto...');
+            const salt = generateSalt();
+            const hashedPassword = await hashPassword('password', salt);
+            
             appData.usuarios = [{ 
-                id: 1, 
+                id: 'admin-' + Date.now(), 
                 nombre: 'Admin Sistema', 
                 usuario: 'admin', 
-                password: 'password', 
+                passwordHash: hashedPassword,
+                salt: salt,
                 rol: 'Admin',
-                proyectosAutorizados: []
+                proyectosAutorizados: [],
+                creadoEn: new Date().toISOString(),
+                ultimoAcceso: new Date().toISOString()
             }];
             appData.proyectos = appData.proyectos || [];
             appData.objetivos = appData.objetivos || [];
