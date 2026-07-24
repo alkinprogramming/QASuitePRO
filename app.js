@@ -1,4 +1,4 @@
-    (function () {
+(function () {
     const SESSION_KEY = 'qaqc_current_user_id', PAGE_KEY = 'qaqc_last_page';
     const SERVER_PAGE_SIZE = 50;
     let appData = {
@@ -1157,16 +1157,107 @@ window.doLogin = async () => {
     }
     window.toggleTheme = () => { appData.configuracion.theme = appData.configuracion.theme === 'dark' ? 'light' : 'dark'; saveData(); applyTheme(); };
 
-    // ============ TOAST ============
-    function toast(msg, type = 'success') {
+    // ============ TOAST INTERACTIVO ============
+    function toast(msg, type = 'success', duration = 3000) {
         const c = document.getElementById('toastContainer');
+        if (!c) return;
         const el = document.createElement('div');
         el.className = `toast toast-${type}`;
         const icons = { success: '✅', error: '❌', warning: '⚠️', info: 'ℹ️' };
-        el.innerHTML = `<span>${icons[type] || ''}</span><span>${msg}</span>`;
+        
+        el.innerHTML = `
+            <span class="toast-icon">${icons[type] || ''}</span>
+            <span class="toast-msg">${msg}</span>
+            <button class="toast-close" aria-label="Cerrar">✕</button>
+            <div class="toast-progress" style="animation-duration: ${duration}ms;"></div>
+        `;
+        
         c.appendChild(el);
-        setTimeout(() => { el.style.animation = 'slideInRight 0.3s ease reverse'; setTimeout(() => el.remove(), 300); }, 3000);
+        
+        const removeToast = () => {
+            el.style.animation = 'slideInRight 0.3s ease reverse';
+            setTimeout(() => el.remove(), 300);
+        };
+        
+        let timeoutId = setTimeout(removeToast, duration);
+        
+        el.querySelector('.toast-close').addEventListener('click', () => {
+            clearTimeout(timeoutId);
+            removeToast();
+        });
+        
+        // Pausar progreso al pasar el ratón
+        el.addEventListener('mouseenter', () => {
+            clearTimeout(timeoutId);
+            const progress = el.querySelector('.toast-progress');
+            if (progress) progress.style.animationPlayState = 'paused';
+        });
+        
+        el.addEventListener('mouseleave', () => {
+            const progress = el.querySelector('.toast-progress');
+            if (progress) progress.style.animationPlayState = 'running';
+            timeoutId = setTimeout(removeToast, 1000); // Reanuda con 1s restante
+        });
     }
+
+    // ============ SKELETONS DE CARGA ============
+    function showGlobalSkeleton() {
+        let overlay = document.getElementById('globalSkeleton');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.id = 'globalSkeleton';
+            overlay.className = 'global-skeleton';
+            overlay.innerHTML = `
+                <div class="skeleton-sidebar skeleton-shimmer"></div>
+                <div class="skeleton-main">
+                    <div class="skeleton-header skeleton-shimmer"></div>
+                    <div class="skeleton-content">
+                        <div class="skeleton-title skeleton-shimmer"></div>
+                        <div class="skeleton-subtitle skeleton-shimmer"></div>
+                        <div class="skeleton-kpi-grid">
+                            <div class="skeleton-kpi skeleton-shimmer"></div>
+                            <div class="skeleton-kpi skeleton-shimmer"></div>
+                            <div class="skeleton-kpi skeleton-shimmer"></div>
+                            <div class="skeleton-kpi skeleton-shimmer"></div>
+                        </div>
+                        <div class="skeleton-chart-grid">
+                            <div class="skeleton-chart skeleton-shimmer"></div>
+                            <div class="skeleton-chart skeleton-shimmer"></div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(overlay);
+        }
+        overlay.style.display = 'flex';
+    }
+
+    function hideGlobalSkeleton() {
+        const overlay = document.getElementById('globalSkeleton');
+        if (overlay) overlay.style.display = 'none';
+    }
+
+    function showContentSkeleton() {
+        const content = document.getElementById('contentArea');
+        if (!content) return;
+        content.innerHTML = `
+            <div class="content-skeleton" style="padding: 32px;">
+                <div class="skeleton-title skeleton-shimmer" style="width: 300px; height: 32px; margin-bottom: 12px;"></div>
+                <div class="skeleton-subtitle skeleton-shimmer" style="width: 200px; height: 16px; margin-bottom: 32px;"></div>
+                <div class="skeleton-kpi-grid">
+                    <div class="skeleton-kpi skeleton-shimmer"></div>
+                    <div class="skeleton-kpi skeleton-shimmer"></div>
+                    <div class="skeleton-kpi skeleton-shimmer"></div>
+                    <div class="skeleton-kpi skeleton-shimmer"></div>
+                </div>
+                <div class="skeleton-chart-grid" style="margin-top:24px;">
+                    <div class="skeleton-chart skeleton-shimmer"></div>
+                    <div class="skeleton-chart skeleton-shimmer"></div>
+                </div>
+            </div>
+        `;
+    }
+
 
     // ============ SIDEBAR TOGGLE ============
     window.toggleSidebar = () => { const sb = document.getElementById('sidebar'); window.innerWidth <= 768 ? sb.classList.toggle('open') : sb.classList.toggle('collapsed'); };
@@ -2570,21 +2661,100 @@ window.doLogin = async () => {
     };
 
     function renderBugs() {
+        // 1. Filtramos para ocultar los que están solucionados (se van a histórico)[cite: 3]
         let data = filterByProject(appData.bugs).filter(b => b.estado !== 'Solucionado');
+        
+        // 2. Mantenemos los filtros superiores que ya tenías[cite: 3]
         const severidadFilter = document.getElementById('filter_bug_sev')?.value || '';
         const estadoBugFilter = document.getElementById('filter_bug_estado')?.value || '';
         if (severidadFilter) data = data.filter(i => i.severidad === severidadFilter);
         if (estadoBugFilter) data = data.filter(i => i.estado === estadoBugFilter);
-        const cols = [{ label: 'ID', field: 'id' }, { label: 'Título', field: 'titulo' }, { label: 'Severidad', field: 'severidad' }, { label: 'Caso', field: 'casoRelacionado' }, { label: 'Estado', field: 'estado' }];
+    
+        const cols = [
+            { label: 'ID', field: 'id' }, 
+            { label: 'Título', field: 'titulo' }, 
+            { label: 'Severidad', field: 'severidad' }, 
+            { label: 'Caso', field: 'casoRelacionado' }, 
+            { label: 'Estado', field: 'estado' }
+        ];
+    
         let html = '<h1 class="page-title">🐛 Bugs Activos</h1>';
-        html += `<div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;"><select id="filter_bug_sev" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);"><option value="">Todas las Severidades</option><option value="Bloqueante" ${severidadFilter === 'Bloqueante' ? 'selected' : ''}>Bloqueante</option><option value="Crítica" ${severidadFilter === 'Crítica' ? 'selected' : ''}>Crítica</option><option value="Mayor" ${severidadFilter === 'Mayor' ? 'selected' : ''}>Mayor</option><option value="Menor" ${severidadFilter === 'Menor' ? 'selected' : ''}>Menor</option></select><select id="filter_bug_estado" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);"><option value="">Todos los Estados</option><option value="Abierto" ${estadoBugFilter === 'Abierto' ? 'selected' : ''}>Abierto</option><option value="En revisión" ${estadoBugFilter === 'En revisión' ? 'selected' : ''}>En revisión</option></select><button class="btn btn-outline btn-sm" onclick="clearFilters('bugs')">🔄 Limpiar Filtros y Búsqueda</button></div>`;
+        
+        // Mantenemos la barra de filtros[cite: 3]
+        html += `<div style="display:flex; gap:10px; margin-bottom:20px; flex-wrap:wrap;">
+            <select id="filter_bug_sev" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todas las Severidades</option>
+                <option value="Bloqueante" ${severidadFilter === 'Bloqueante' ? 'selected' : ''}>Bloqueante</option>
+                <option value="Crítica" ${severidadFilter === 'Crítica' ? 'selected' : ''}>Crítica</option>
+                <option value="Mayor" ${severidadFilter === 'Mayor' ? 'selected' : ''}>Mayor</option>
+                <option value="Menor" ${severidadFilter === 'Menor' ? 'selected' : ''}>Menor</option>
+            </select>
+            <select id="filter_bug_estado" onchange="renderPage('bugs')" style="padding:8px 12px; border-radius:8px; background:var(--input); color:var(--text); border:1px solid var(--border);">
+                <option value="">Todos los Estados</option>
+                <option value="Abierto" ${estadoBugFilter === 'Abierto' ? 'selected' : ''}>Abierto</option>
+                <option value="En revisión" ${estadoBugFilter === 'En revisión' ? 'selected' : ''}>En revisión</option>
+            </select>
+            <button class="btn btn-outline btn-sm" onclick="clearFilters('bugs')">🔄 Limpiar Filtros</button>
+        </div>`;
+    
         html += renderTable('bugs', cols, data, i => {
             const captura = appData.capturas.find(c => c.vinculo === i.id && c.archivos);
             const hasCapture = captura ? 'has-capture-indicator' : '';
-            return `<td class="${hasCapture}"><code>${i.id}</code></td><td><b>${i.titulo}</b></td><td><span class="badge ${i.severidad === 'Bloqueante' ? 'badge-danger' : i.severidad === 'Crítica' ? 'badge-warning' : 'badge-info'}">${i.severidad}</span></td><td><code>${i.casoRelacionado || '-'}</code></td><td><span class="badge ${i.estado === 'Abierto' ? 'badge-danger' : 'badge-warning'}">${i.estado}</span></td>`;
+            
+            // 3. Opciones exactas de tu sistema[cite: 3]
+            const estados = ['Abierto', 'En revisión', 'Solucionado'];
+            const selectOptions = estados.map(e => 
+                `<option value="${e}" ${i.estado === e ? 'selected' : ''}>${e}</option>`
+            ).join('');
+    
+            let statusClass = 'status-pending';
+            if (i.estado === 'Abierto') statusClass = 'status-failed';
+            if (i.estado === 'En revisión') statusClass = 'status-progress';
+    
+            const selectHtml = `
+                <select class="status-select ${statusClass}" 
+                        onchange="actualizarEstadoBugInline('${i.id}', this.value)" 
+                        onclick="event.stopPropagation()">
+                    ${selectOptions}
+                </select>
+            `;
+    
+            return `<td class="${hasCapture}"><code>${i.id}</code></td>
+                    <td><b>${i.titulo}</b></td>
+                    <td><span class="badge ${i.severidad === 'Bloqueante' ? 'badge-danger' : i.severidad === 'Crítica' ? 'badge-warning' : 'badge-info'}">${i.severidad}</span></td>
+                    <td><code>${i.casoRelacionado || '-'}</code></td>
+                    <td>${selectHtml}</td>`;
         }, true, 'bug');
+        
         return html;
     }
+
+    // ✅ Cambiar el estado de un Bug de forma inline desde la tabla
+    window.actualizarEstadoBugInline = async function(bugId, nuevoEstado) {
+        // 1. Buscar el índice del bug correspondiente en los datos
+        const bugIndex = appData.bugs.findIndex(b => String(b.id) === String(bugId));
+        
+        if (bugIndex >= 0) {
+            // 2. Actualizar el estado localmente
+            appData.bugs[bugIndex].estado = nuevoEstado;
+            
+            try {
+                // 3. Guardar los datos en Firebase (utiliza tu función existente)
+                await saveData();
+                
+                // 4. Refrescar la página actual para que el select actualice su color CSS
+                renderPage('bugs');
+                
+                // 5. Notificar al usuario
+                toast(`Estado actualizado a "${nuevoEstado}"`, 'success');
+            } catch (error) {
+                console.error("Error actualizando el estado del bug:", error);
+                toast("Error al guardar el nuevo estado", "error");
+            }
+        } else {
+            toast("No se encontró el defecto especificado", "error");
+        }
+    };
 
     function renderHistorico() {
         const data = filterByProject(appData.bugs).filter(b => b.estado === 'Solucionado');
@@ -3468,13 +3638,10 @@ window.doLogin = async () => {
 
     // 3. Reemplazo de la función principal de análisis
     window.analizarDocumentoIA = async function() {
-        // console.log('🔍 Iniciando análisis con IA Real...');
         const reqId = document.getElementById('f_id')?.value;
         currentAnalisisRequisitoId = reqId;
-        
         let tempDoc = sessionStorage.getItem('temp_documento_' + getActiveProject());
         let docData;
-        
         if (tempDoc) { 
             docData = JSON.parse(tempDoc); 
         } else {
@@ -3483,31 +3650,28 @@ window.doLogin = async () => {
             if (!req || !req.documento) { toast('No hay documento cargado. Sube un PDF, DOCX o TXT primero.', 'error'); return; }
             docData = { contenido: req.documento, nombre: req.nombreDocumento || 'documento.pdf', tipo: req.tipoDocumento || 'application/pdf' };
         }
-
-        // 1. Obtener API Key
+        
         const apiKey = await getGeminiApiKey();
         if (!apiKey) { toast('Se requiere API Key para usar la IA', 'error'); return; }
-
+        
         try {
-            // 2. Extraer texto (usando tu función existente de PDF.js / TXT)
-            toast('Extrayendo texto del documento...', 'info');
-            const texto = await extraerTextoDeDocumento(docData.contenido, docData.tipo);
+            showContentSkeleton(); // 🦴 MOSTRAR SKELETON MIENTRAS PROCESA
+            toast('La IA está leyendo y entendiendo el documento...', 'info', 5000);
             
+            const texto = await extraerTextoDeDocumento(docData.contenido, docData.tipo);
             if (!texto || texto.length < 50) { 
+                renderPage(currentPage); // Restaurar vista
                 toast('El documento parece estar vacío o no es legible.', 'warning'); 
                 return; 
             }
-
-            // 3. Llamar a la IA Real
-            toast('La IA está leyendo y entendiendo el documento...', 'info');
+            
             const casosIA = await generarCasosConLLM(texto, apiKey);
-
             if (!casosIA || !Array.isArray(casosIA) || casosIA.length === 0) { 
+                renderPage(currentPage); // Restaurar vista
                 toast('La IA no pudo extraer casos de este documento.', 'warning'); 
                 return; 
             }
-
-            // 4. Mapear al formato que espera tu modal de revisión manual
+            
             const casosSugeridos = casosIA.map((c, idx) => ({
                 id: 'IA-' + (idx + 1),
                 titulo: c.titulo || 'Caso sin título',
@@ -3517,17 +3681,16 @@ window.doLogin = async () => {
                 pasos: Array.isArray(c.pasos) ? c.pasos : [],
                 resultado: c.resultado || '',
                 prioridad: c.prioridad || 'Media',
-                confianza: 95 // Al ser IA real, le damos alta confianza
+                confianza: 95
             }));
-
-            // console.log(`✅ ${casosSugeridos.length} casos generados por IA Real.`);
             
-            // 5. Mostrar modal para revisión manual
+            renderPage(currentPage); // 🔄 RESTAURAR VISTA ANTES DE ABRIR MODAL
             mostrarModalRevisionCasos(casosSugeridos, docData);
         } catch (error) { 
+            renderPage(currentPage); // 🔄 RESTAURAR VISTA EN CASO DE ERROR
             console.error('Error al analizar documento:', error);
             if (error.message.includes('API key not valid')) {
-                localStorage.removeItem('qa_gemini_api_key'); // Borramos la key mala
+                localStorage.removeItem('qa_gemini_api_key');
                 toast('API Key inválida o con restricciones. Se ha borrado. Vuelve a intentar y usa una clave de Google AI Studio sin espacios.', 'error');
             } else if (error.message.includes('API')) {
                 localStorage.removeItem('qa_gemini_api_key');
@@ -3537,7 +3700,7 @@ window.doLogin = async () => {
             }
         }
     };
-
+    
     // ============ FUNCIÓN DE MIGRACIÓN DE DATOS ANTIGUOS ============
     async function migrarDatosAntiguos() {
         let necesitaGuardar = false;
@@ -3582,7 +3745,8 @@ window.doLogin = async () => {
     }
 
     // ============ INIT ============
-    async function init() {       
+    async function init() {
+        showGlobalSkeleton(); // 🦴 MOSTRAR SKELETON GLOBAL AL INICIAR
         // Ocultar ambas pantallas inicialmente
         document.getElementById('authScreen').style.display = 'none';
         document.getElementById('appScreen').style.display = 'none';
@@ -3592,18 +3756,25 @@ window.doLogin = async () => {
             try {
                 await new Promise((resolve) => {
                     const unsubscribe = auth.onAuthStateChanged((user) => {
-                        unsubscribe(); // Dejar de escuchar después del primer evento
+                        unsubscribe();
                         resolve(user);
                     });
-                    
-                    // Timeout de 3 segundos por si acaso
                     setTimeout(resolve, 3000);
                 });
-                // console.log('✅ Estado de autenticación determinado');
             } catch (error) {
                 console.error('❌ Error al verificar autenticación:', error);
             }
         }
+        
+        try {
+            const cloudData = await getFromDB("qa_suite_pro_state");
+            if (cloudData) { 
+                appData = cloudData;
+            }
+        } catch (e) { 
+            console.error("Error al cargar de Firebase:", e);
+        }    
+
 
           // 2. Intentar cargar datos desde Firebase
         try {
